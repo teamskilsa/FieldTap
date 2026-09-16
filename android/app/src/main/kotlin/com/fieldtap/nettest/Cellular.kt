@@ -120,6 +120,27 @@ class CellularTestTransport(
     private val clock: Clock,
     private val nanoTime: () -> Long = SystemClock::elapsedRealtimeNanos,
 ) : NetTestTransport {
+    /**
+     * [ping], reporting each echo as it completes: its sequence and its round trip, or null when it was
+     * lost. The Traffic tab draws these as they arrive, since a ping that says nothing for ten seconds
+     * and then prints a summary tells an engineer nothing while they are watching the link.
+     */
+    suspend fun pingLive(
+        target: String,
+        count: Int,
+        timeoutMs: Long,
+        onEcho: (sequence: Int, rttMs: Double?) -> Unit,
+    ): PingOutcome = withContext(Dispatchers.IO) {
+        val waitStartedMs = clock.elapsedRealtimeMillis()
+        networks.withCellular(NETWORK_TIMEOUT_MS) { network ->
+            if (network == null) {
+                PingOutcome.Failed(NetFailure.NO_CELLULAR_NETWORK, null, secondsSince(waitStartedMs))
+            } else {
+                pingOn(network, target, count.coerceAtLeast(1), timeoutMs.coerceAtLeast(1), onEcho)
+            }
+        }
+    }
+
     override suspend fun ping(target: String, count: Int, timeoutMs: Long): PingOutcome = withContext(Dispatchers.IO) {
         val waitStartedMs = clock.elapsedRealtimeMillis()
         networks.withCellular(NETWORK_TIMEOUT_MS) { network ->
@@ -248,7 +269,13 @@ class CellularTestTransport(
             else -> UploadOutcome.Failed(NetFailure.IO, error?.javaClass?.simpleName, seconds, httpCode, bytes)
         }
 
-    private suspend fun pingOn(network: Network, target: String, count: Int, timeoutMs: Long): PingOutcome {
+    private suspend fun pingOn(
+        network: Network,
+        target: String,
+        count: Int,
+        timeoutMs: Long,
+        onEcho: ((sequence: Int, rttMs: Double?) -> Unit)? = null,
+    ): PingOutcome {
         val startedMs = clock.elapsedRealtimeMillis()
         val addresses: Array<InetAddress> = try {
             network.getAllByName(target)
@@ -291,11 +318,15 @@ class CellularTestTransport(
                 try {
                     Os.sendto(socket, packet, 0, packet.size, 0, address, 0)
                     sent++
-                    awaitReply(socket, buffer, sequence, sentAtNanos, timeoutMs)?.let { rtts += it }
+                    val rtt = awaitReply(socket, buffer, sequence, sentAtNanos, timeoutMs)
+                    rtt?.let { rtts += it }
+                    onEcho?.invoke(index, rtt)
                 } catch (e: ErrnoException) {
                     lastError = OsConstants.errnoName(e.errno)
+                    onEcho?.invoke(index, null)
                 } catch (e: SocketException) {
                     lastError = e.javaClass.simpleName
+                    onEcho?.invoke(index, null)
                 }
                 if (index < count) {
                     val spentMs = (nanoTime() - sentAtNanos) / NANOS_PER_MS

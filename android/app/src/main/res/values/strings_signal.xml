@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Signal tab: the serving cell, its channel and identity, and the cells around it.
+
+  Its own file because it is its own screen, and the neighbouring files carry naming guards
+  (SessionStringsTest, SetupStringsTest) that are about their screens, not this one.
+-->
+<resources>
+    <!-- The four tabs. -->
+    <string name="nav_signal">Signal</string>
+    <string name="nav_traffic">Traffic</string>
+    <string name="nav_logs">Logs</string>
+    <string name="sig_title">Signal</string>
+    <!-- The age of the serving sample, e.g. "0.4 s". -->
+    <string name="sig_age">%1$s s</string>
+    <string name="sig_rsrp">RSRP</string>
+    <string name="sig_dbm">dBm</string>
+    <string name="sig_serving_cell">Serving cell</string>
+    <string name="sig_nr_leg">5G NR leg</string>
+    <string name="sig_neighbours">Neighbours</string>
+    <string name="sig_neighbours_none">No neighbour cells reported.</string>
+    <!-- Grid labels. -->
+    <string name="sig_pci">PCI</string>
+    <string name="sig_earfcn">EARFCN</string>
+    <string name="sig_nrarfcn">NR-ARFCN</string>
+    <string name="sig_band">Band</string>
+    <string name="sig_dl">Downlink</string>
+    <string name="sig_ul">Uplink</string>
+    <string name="sig_enb">eNB</string>
+    <string name="sig_cell">Cell</string>
+    <string name="sig_tac">TAC</string>
+    <string name="sig_eci">ECI</string>
+    <string name="sig_bandwidth">Bandwidth</string>
+    <string name="sig_rssi">RSSI</string>
+    <string name="sig_ta">Timing advance</string>
+    <string name="sig_cqi">CQI</string>
+    <string name="sig_plmn">PLMN</string>
+    <string name="sig_frequency">Frequency</string>
+    <!-- Values with units. -->
+    <string name="sig_mhz">%1$s MHz</string>
+    <string name="sig_dbm_value">%1$d dBm</string>
+    <!-- %1$d is the TA, %2$d the distance it implies in metres. -->
+    <string name="sig_ta_value">%1$d · ~%2$d m</string>
+    <string name="sig_band_value">B%1$d</string>
+    <string name="sig_nr_band_value">n%1$d</string>
+    <string name="sig_tdd">TDD</string>
+    <!-- A neighbour against the serving cell. %1$d is the difference in dB. -->
+    <string name="sig_stronger">%1$d dB stronger</string>
+    <string name="sig_weaker">%1$d dB weaker</string>
+    <string name="sig_equal">same as serving</string>
+    <string name="sig_same_pci_mod3">PCI mod 3 clash</string>
+    <!-- Nothing to measure. -->
+    <string name="sig_no_cell_title">No LTE or 5G cell</string>
+    <string name="sig_out_of_service">The phone is not registered to any network.</string>
+    <string name="sig_emergency_only">Emergency calls only. The phone is camped but not registered.</string>
+    <string name="sig_waiting">Waiting for the modem to report a cell.</string>
+    <string name="sig_location_needed_title">Needs precise location</string>
+    <string name="sig_location_needed">Android hides cell identity from apps without precise location.</string>
+    <string name="sig_location_allow">Allow</string>
+    <string name="sig_location_off_title">Location is off</string>
+    <string name="sig_location_off">Android returns no cell information while location is off.</string>
+    <string name="sig_location_turn_on">Turn on</string>
+    <string name="sig_stale">Last reading %1$s s ago</string>
+</resources>

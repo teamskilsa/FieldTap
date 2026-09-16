@@ -141,7 +141,7 @@ class LocationOffTest {
         result["outcome_markers_dropped"] = outcome.markersDropped
         save()
 
-        screens.openTab(R.string.nav_recordings)
+        screens.openTab(R.string.nav_logs)
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.click(row)
@@ -155,7 +155,7 @@ class LocationOffTest {
         screens.back()
         screens.await(row)
         // Sessions is a tab root now: leave it by the Live tab, not a Back arrow.
-        screens.openTab(R.string.nav_live)
+        screens.openTab(R.string.nav_signal)
         screens.awaitText(R.string.live_title)
     }
 

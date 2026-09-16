@@ -40,102 +40,12 @@ import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 
 /**
- * Signalling: one button, and what it is doing.
+ * A kept signalling capture, opened: its call flow.
  *
- * The captures themselves are not listed here. They live in Recordings with the drives, because a kept
- * capture and a kept drive are the same thing to the person looking for one, and two lists in two tabs
- * meant remembering which tab held which.
+ * Starting and stopping a capture is on the Logs tab, beside the signal log; this is where one is read.
  *
  * Owner: workstream `diag-on-handset`.
  */
-@Composable
-fun SignallingScreen(
-    viewModel: SignallingViewModel,
-    onOpenCapture: (String) -> Unit,
-    onOpenRecordings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    // A finished capture opens itself. Recording it and then hunting for it were two steps too many.
-    LaunchedEffect(state.justSaved) {
-        state.justSaved?.let { name ->
-            viewModel.consumeJustSaved()
-            onOpenCapture(name)
-        }
-    }
-    Scaffold(
-        modifier = modifier,
-        topBar = { FieldTapTopBar(title = stringResource(R.string.signalling_title)) },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = Spacing.Lg)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
-        ) {
-            Spacer(modifier = Modifier.height(Spacing.Lg))
-            CaptureCard(state, viewModel)
-            if (state.keptCount > 0) {
-                KeptLine(count = state.keptCount, onClick = onOpenRecordings)
-            }
-            Spacer(modifier = Modifier.height(Spacing.Lg))
-        }
-    }
-}
-
-/** Where the captures went: they are listed with the drives, not here. One list, one place. */
-@Composable
-private fun KeptLine(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    SectionCard(modifier = modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.Sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = pluralStringResource(R.plurals.signalling_kept_line, count, count),
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                imageVector = FieldTapIcons.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CaptureCard(state: SignallingUiState, viewModel: SignallingViewModel) {
-    SectionCard(title = stringResource(R.string.signalling_capture_title)) {
-        Text(
-            text = stringResource(R.string.signalling_explainer),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        state.message?.let {
-            StatusBanner(
-                message = it,
-                tone = if (state.failed) StatusTone.ERROR else StatusTone.INFO,
-                icon = FieldTapIcons.SignalBars,
-            )
-        }
-        if (state.capturing) {
-            Button(onClick = viewModel::stop, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-                Text(text = stringResource(R.string.signalling_stop))
-            }
-        } else {
-            Button(onClick = viewModel::start, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-                Text(text = stringResource(R.string.signalling_start))
-            }
-        }
-    }
-}
-
 /** The call flow of one capture, decoded from its file every time it is opened. */
 @Composable
 fun CaptureDetailScreen(

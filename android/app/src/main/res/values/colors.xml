@@ -12,8 +12,8 @@
 
     <!-- Compose's surface in each theme, so the window, splash and first frame match (no launch flash). -->
     <color name="window_background_light">#EEF1F8</color>
-    <color name="window_background_dark">#0E1017</color>
-    <!-- The Momentum indigo UI accent (Compose primary in each theme), for the window's colorPrimary/colorAccent. -->
+    <color name="window_background_dark">#090D12</color>
+    <!-- The UI accent (Compose primary in each theme), for the window's colorPrimary/colorAccent. -->
     <color name="brand_primary_light">#4F46E5</color>
-    <color name="brand_primary_dark">#AEB6FF</color>
+    <color name="brand_primary_dark">#3DD6EA</color>
 </resources>

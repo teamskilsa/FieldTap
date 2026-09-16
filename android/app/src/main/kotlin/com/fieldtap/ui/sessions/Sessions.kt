@@ -224,6 +224,9 @@ fun SessionsScreen(
     onOpenCapture: (name: String) -> Unit,
     onGoToLive: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
+    /** Drawn above the list, and above the empty state: the Logs tab's record controls. */
+    header: (@Composable () -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
@@ -235,6 +238,8 @@ fun SessionsScreen(
         onGoToLive = onGoToLive,
         onRefresh = viewModel::refresh,
         modifier = modifier,
+        title = title,
+        header = header,
     )
 }
 
@@ -445,6 +450,8 @@ private fun SessionsContent(
     onGoToLive: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
+    header: (@Composable () -> Unit)? = null,
 ) {
     val recordings = recordingsOf(state)
     val showLoading = rememberDelayedVisibility(state.loading && recordings.isEmpty())
@@ -455,7 +462,7 @@ private fun SessionsContent(
             // A tab root: no Back arrow — the bottom tab bar is how you leave.
             FieldTapTopBar(
                 scroll = topBarScroll,
-                title = stringResource(R.string.sessions_title),
+                title = title ?: stringResource(R.string.sessions_title),
                 actions = {
                     TopBarAction(
                         icon = FieldTapIcons.Refresh,
@@ -470,6 +477,16 @@ private fun SessionsContent(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
+                // With record controls above it, the list is never replaced by a centred empty state:
+                // the controls are how the list stops being empty.
+                header != null -> SessionsList(
+                    state = state,
+                    recordings = recordings,
+                    nowUtcMs = nowUtcMs,
+                    onOpenSession = onOpenSession,
+                    onOpenCapture = onOpenCapture,
+                    header = header,
+                )
                 recordings.isEmpty() && state.loading -> if (showLoading) {
                     CenteredContent { LoadingState(message = stringResource(R.string.sessions_loading)) }
                 }
@@ -511,6 +528,7 @@ private fun SessionsList(
     nowUtcMs: Long,
     onOpenSession: (String) -> Unit,
     onOpenCapture: (String) -> Unit,
+    header: (@Composable () -> Unit)? = null,
 ) {
     val storage = state.storage
     val labels = signalQualityLabels()
@@ -523,6 +541,9 @@ private fun SessionsList(
         verticalArrangement = Arrangement.spacedBy(Spacing.Md),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (header != null) {
+            item(key = "header") { androidx.compose.foundation.layout.Box(Modifier.contentWidth()) { header() } }
+        }
         if (state.loadFailed) {
             item(key = "stale") {
                 StatusBanner(
@@ -546,6 +567,17 @@ private fun SessionsList(
             item(key = "storage") { StorageCard(storage = storage, modifier = Modifier.contentWidth()) }
         } else if (storage != null) {
             item(key = "storage-meter") { StorageMeter(storage = storage, modifier = Modifier.contentWidth()) }
+        }
+        if (header != null && recordings.isEmpty()) {
+            item(key = "none") {
+                Text(
+                    text = if (state.loading) stringResource(R.string.sessions_loading) else stringResource(R.string.sessions_empty_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.contentWidth().padding(top = Spacing.Sm),
+                )
+            }
+            return@LazyColumn
         }
         item(key = "list-header") {
             Eyebrow(

@@ -10,15 +10,8 @@
   The strings a capture contributes to the Recordings list live here too, for the same reason.
 -->
 <resources>
-    <!-- The tab label. It lives here, not with the session strings, because those must not
-         suggest signalling: the session screens promise not to decode it. -->
-    <string name="nav_signalling">Signalling</string>
     <!-- Signalling capture (rooted phones only). -->
     <string name="signalling_title">Signalling</string>
-    <string name="signalling_capture_title">Record the call flow</string>
-    <string name="signalling_explainer">Records what the phone and the network say to each other: attach, handover, and any reason the network says no. Needs root.</string>
-    <string name="signalling_start">Start</string>
-    <string name="signalling_stop">Stop and read</string>
     <string name="signalling_export">Export the raw file</string>
     <string name="signalling_export_subject">FieldTap signalling capture</string>
     <string name="signalling_flow_title">Call flow</string>
@@ -42,11 +35,6 @@
     <string name="signalling_quiet_message">The modem recorded, but none of it was RRC or NAS. That is what a phone that is not attached to a network sounds like — check the service state on Live. The raw file is kept either way.</string>
     <!-- %1$s is the file size. Shown when the capture holds no log records at all. -->
     <string name="signalling_flow_nothing_read">%1$s recorded · no RRC or NAS in it</string>
-    <!-- The line under the button, pointing at the Recordings tab where the captures are listed. -->
-    <plurals name="signalling_kept_line">
-        <item quantity="one">%1$d capture, in Recordings</item>
-        <item quantity="other">%1$d captures, in Recordings</item>
-    </plurals>
     <!-- How a capture names itself in the Recordings list, beside the drives. -->
     <string name="recordings_capture_kind">Call flow</string>
     <!-- %1$d messages the network refused. -->

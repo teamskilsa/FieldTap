@@ -70,11 +70,11 @@ HEARTBEAT_SLACK_MS = 7_000
 
 # Screens taken at every scroll position: NAME-p1.png, NAME-p2.png and so on (Screens.shotFull).
 FIRST_RUN_PAGED = ("01-disclosure", "01b-disclosure-notice", "02-permissions")
-TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-signalling", "07-probe", "07c-probe-root-check",
+TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-traffic", "07-probe", "07c-probe-root-check",
               "08-settings", "08b-test-targets", "09-about")
 # Taken once: the Start dialog, and the bottom navigation bar with Live selected (10-nav-live) and with another tab
-# selected (10b-nav-signalling) — the tab-navigation evidence, in every variant.
-TOUR_SINGLE = ("03b-start-dialog", "10-nav-live", "10b-nav-signalling")
+# selected (10b-nav-traffic) — the tab-navigation evidence, in every variant.
+TOUR_SINGLE = ("03b-start-dialog", "10-nav-live", "10b-nav-traffic")
 # Upright variants also turn the phone for Live; the landscape variant takes every screen turned.
 LIVE_TURNED = "03e-live-landscape"
 WALK_SCREENS = (

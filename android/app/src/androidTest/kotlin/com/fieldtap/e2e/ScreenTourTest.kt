@@ -21,7 +21,7 @@ import org.junit.runner.RunWith
  * Every screen after the walk, at every scroll position ([Screens.shotFull]), in the variant `-e variant` names: Live with
  * its serving cell, the Start dialog, Sessions, the walk's detail, Readiness, Probe, Settings, its Test targets and About.
  * It also proves the four-tab navigation: each tab tap is checked to move the bottom bar's selection to that tab, and the
- * bar is captured with Live selected (`10-nav-live`) and with another tab selected (`10b-nav-signalling`). An upright
+ * bar is captured with Live selected (`10-nav-live`) and with another tab selected (`10b-nav-traffic`). An upright
  * variant also turns the phone for Live, the screen a car mount holds; the landscape variant takes every screen turned. On
  * a phone-sized screen upright at font scale 1.0, Live's 5-minute chart must lie wholly on the first screen. The disclosure
  * and Permissions screens are taken on a first run by [FirstRunScreensTest]. `-e dir_name` is the walk's session.
@@ -49,8 +49,8 @@ class ScreenTourTest {
         }
         screens.shotFull("03-live")
         // The bottom navigation bar with Live selected: the tab tap that opened this screen is reflected in the bar.
-        screens.assertTabSelected(R.string.nav_live, selected = true)
-        screens.assertTabSelected(R.string.nav_recordings, selected = false)
+        screens.assertTabSelected(R.string.nav_signal, selected = true)
+        screens.assertTabSelected(R.string.nav_logs, selected = false)
         screens.shot("10-nav-live")
         if (!variant.landscape) {
             // A phone in landscape: two panes, with the session buttons beside them instead of under them.
@@ -70,9 +70,9 @@ class ScreenTourTest {
         screens.click((hasText(cancel) or hasContentDescription(cancel)) and hasClickAction() and hasAnyAncestor(isDialog()))
 
         // Recordings tab: the recorded drive and its detail. The tap moves the bar's selection off Live.
-        screens.openTab(R.string.nav_recordings)
-        screens.assertTabSelected(R.string.nav_recordings, selected = true)
-        screens.assertTabSelected(R.string.nav_live, selected = false)
+        screens.openTab(R.string.nav_logs)
+        screens.assertTabSelected(R.string.nav_logs, selected = true)
+        screens.assertTabSelected(R.string.nav_signal, selected = false)
         val row = hasText(sessionName) and hasClickAction()
         screens.await(row)
         screens.shotFull("04-sessions")
@@ -84,18 +84,18 @@ class ScreenTourTest {
         screens.back()
         screens.await(row)
 
-        // Signalling tab: the capture control. Its captures are listed in Recordings, not here, so this
-        // screen is the button and what it is doing — nothing else.
-        screens.openTab(R.string.nav_signalling)
-        screens.assertTabSelected(R.string.nav_signalling, selected = true)
-        screens.assertTabSelected(R.string.nav_live, selected = false)
-        screens.awaitText(R.string.signalling_capture_title)
-        screens.shotFull("07-signalling")
-        screens.shot("10b-nav-signalling")
+        // Traffic tab: iperf3 and ping against a server the user names. The bar now shows a tab other than
+        // Signal selected, the counterpart to the Signal-selected shot above.
+        screens.openTab(R.string.nav_traffic)
+        screens.assertTabSelected(R.string.nav_traffic, selected = true)
+        screens.assertTabSelected(R.string.nav_signal, selected = false)
+        screens.awaitText(R.string.traffic_server)
+        screens.shotFull("07-traffic")
+        screens.shot("10b-nav-traffic")
 
-        // Setup tab, and every screen it reaches: the capability probe, the readiness check, the targets, About.
-        screens.openTab(R.string.nav_setup)
-        screens.assertTabSelected(R.string.nav_setup, selected = true)
+        // Settings tab, and every screen it reaches: the capability probe, the readiness check, the targets, About.
+        screens.openTab(R.string.nav_settings)
+        screens.assertTabSelected(R.string.nav_settings, selected = true)
         screens.awaitText(R.string.settings_section_measurement)
         screens.shotFull("08-settings")
         visitFromSettings(screens, R.string.settings_readiness, R.string.readiness_checks_title, "06-readiness")

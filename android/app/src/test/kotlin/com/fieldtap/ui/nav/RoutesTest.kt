@@ -23,8 +23,8 @@ class RoutesTest {
         val routes = listOf(
             Routes.DISCLOSURE, Routes.PERMISSIONS, Routes.ABOUT_ONBOARDING, Routes.LIVE, Routes.SESSIONS,
             Routes.SESSION_DETAIL, Routes.READINESS, Routes.PROBE, Routes.SETTINGS, Routes.TEST_TARGETS, Routes.ABOUT,
-            Routes.SIGNALLING, Routes.CAPTURE_DETAIL,
-            Routes.LIVE_GRAPH, Routes.SESSIONS_GRAPH, Routes.SIGNALLING_GRAPH, Routes.SETTINGS_GRAPH,
+            Routes.TRAFFIC, Routes.CAPTURE_DETAIL,
+            Routes.LIVE_GRAPH, Routes.SESSIONS_GRAPH, Routes.TRAFFIC_GRAPH, Routes.SETTINGS_GRAPH,
         )
         assertEquals(routes.size, routes.toSet().size)
     }
@@ -47,6 +47,11 @@ class RoutesTest {
     fun everyTabsRootLivesInItsOwnGraph() {
         assertEquals(TopTab.entries.size, TopTab.entries.map { it.graph }.toSet().size)
         assertEquals(TopTab.entries.size, TopTab.entries.map { it.root }.toSet().size)
+    }
+
+    @Test
+    fun theTabsAreSignalTrafficLogsSettingsInThatOrder() {
+        assertEquals(listOf(TopTab.SIGNAL, TopTab.TRAFFIC, TopTab.LOGS, TopTab.SETTINGS), TopTab.entries)
     }
 
     @Test

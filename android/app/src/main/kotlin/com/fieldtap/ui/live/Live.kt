@@ -555,6 +555,7 @@ fun SignalChart(
     modifier: Modifier = Modifier,
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
     compact: Boolean = false,
+    showSinr: Boolean = true,
 ) {
     val windowMs = LiveStateReducer.WINDOW_MS
     val rsrpStats = ChartMath.stats(rsrp, nowElapsedMs, windowMs)
@@ -585,7 +586,7 @@ fun SignalChart(
             notReported = stringResource(R.string.chart_not_reported),
             window = stringResource(R.string.chart_window),
         ),
-        summary = "$rsrpSummary $sinrSummary",
+        summary = if (showSinr) "$rsrpSummary $sinrSummary" else rsrpSummary,
         modifier = modifier,
         windowMs = windowMs,
         gapThresholdMs = gapThresholdMs,
@@ -598,6 +599,7 @@ fun SignalChart(
             else -> Sizes.ChartPanelHeight
         },
         sinrPanelHeight = if (compact) Sizes.ChartPanelCompactHeight else Sizes.ChartPanelHeight,
+        showSinr = showSinr,
     )
 }
 
@@ -1900,6 +1902,34 @@ private fun StopDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
         icon = { Icon(imageVector = FieldTapIcons.Stop, contentDescription = null) },
         title = { Text(text = stringResource(R.string.live_stop_dialog_title)) },
         text = { Text(text = stringResource(R.string.live_stop_dialog_text)) },
+    )
+}
+
+/**
+ * The pre-start sheet for a recording started somewhere other than the old Live screen — the Logs tab.
+ * The same checks, the same fixes and the same "Start anyway"; only who asked is different.
+ */
+@Composable
+internal fun PrestartReview(review: PrestartState.Review, viewModel: LiveViewModel, requestPreciseLocation: () -> Unit) {
+    PrestartSheet(
+        review = review,
+        actions = LiveActions(
+            onStart = viewModel::start,
+            onStartAnyway = viewModel::startAnyway,
+            onDismissPrestart = viewModel::dismissPrestart,
+            onRecheck = viewModel::recheckReadiness,
+            onMark = viewModel::mark,
+            onStop = viewModel::stop,
+            onDismissRefusal = viewModel::dismissRefusal,
+            onAcknowledgeRecovered = viewModel::acknowledgeRecovered,
+            onConsumeMessage = viewModel::consumeMessage,
+            onOpenSessions = {},
+            onOpenReadiness = {},
+            onOpenDisclosure = {},
+            onOpenSession = {},
+            nowWallMs = viewModel::nowWallMs,
+        ),
+        requestPreciseLocation = requestPreciseLocation,
     )
 }
 
