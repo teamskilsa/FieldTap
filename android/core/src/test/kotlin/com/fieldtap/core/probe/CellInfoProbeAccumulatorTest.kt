@@ -143,12 +143,23 @@ class CellInfoProbeAccumulatorTest {
     }
 
     @Test
-    fun statusesWithoutAPrimaryMeanNoServingCell() {
+    fun anIdlePhoneCampedOnACellHasAServingCell() {
+        // RRC idle: status 0 on the cell the phone is registered to. That is the normal state of an
+        // attached phone moving no data, and it is still being served — a probe that called it
+        // unserved told a user with a working lab network that FieldTap could not measure it.
         val probe = CellInfoProbeAccumulator()
-        probe.onAnswer(answer(lte(status = 0, timestampMs = 1_000)))
+        probe.onAnswer(answer(lte(status = 0, registered = true, timestampMs = 1_000)))
+
+        assertEquals(listOf(Rat.LTE.wire), probe.result().servingRats)
+        assertTrue(probe.result().connectionStatusReported)
+    }
+
+    @Test
+    fun statusesWithNothingRegisteredMeanNoServingCell() {
+        val probe = CellInfoProbeAccumulator()
+        probe.onAnswer(answer(lte(status = 0, registered = false, timestampMs = 1_000)))
 
         assertTrue(probe.result().servingRats.isEmpty())
-        assertTrue(probe.result().connectionStatusReported)
         assertTrue(probe.notes().contains("No primary serving cell was identified, so no KPI rows would be written."))
     }
 

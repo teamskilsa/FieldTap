@@ -54,12 +54,37 @@ class ServingCellSelectorTest {
     }
 
     @Test
-    fun statusesWithoutAPrimaryMeanNoPrimary() {
+    fun anIdlePhoneIsServedByTheCellItIsCampedOn() {
+        // The OnePlus 10 Pro on a Simnovus callbox, attached with no data bearer: RRC idle, so every
+        // cell reports CONNECTION_NONE — the camped one included. Captured from `dumpsys
+        // telephony.registry`: mRegistered=YES mCellConnectionStatus=0 PCI 1 EARFCN 3350 RSRP -91.
+        val camped = lte(0, pci = 1, earfcn = 3350, status = CellSnapshot.CONNECTION_NONE, registered = true)
+        val neighbour = lte(0, pci = 2, earfcn = 3350, status = CellSnapshot.CONNECTION_NONE, registered = false)
+        val selection = ServingCellSelector.select(listOf(neighbour, camped))
+        assertEquals(camped, selection.primary)
+        assertNull(selection.nsaSecondary)
+    }
+
+    @Test
+    fun anIdlePhoneWithNoRegisteredCellHasNoPrimary() {
+        // Statuses reported and nothing camped: a genuine out-of-service answer, not a guess.
         val selection = ServingCellSelector.select(
-            listOf(lte(0, status = CellSnapshot.CONNECTION_NONE, registered = true), lte(0, pci = 1, status = null, registered = true)),
+            listOf(lte(0, status = CellSnapshot.CONNECTION_NONE, registered = false), lte(0, pci = 1, status = CellSnapshot.CONNECTION_NONE, registered = false)),
         )
         assertNull(selection.primary)
-        assertNull(selection.nsaSecondary)
+    }
+
+    @Test
+    fun aRegisteredSecondaryLegIsNotPromotedToPrimary() {
+        val leg = nr(0, status = CellSnapshot.CONNECTION_SECONDARY_SERVING, registered = true)
+        assertNull(ServingCellSelector.select(listOf(leg)).primary)
+    }
+
+    @Test
+    fun aPrimaryByStatusStillBeatsARegisteredIdleCell() {
+        val idle = lte(0, pci = 1, status = CellSnapshot.CONNECTION_NONE, registered = true)
+        val connected = lte(0, pci = 7, status = CellSnapshot.CONNECTION_PRIMARY_SERVING, registered = false)
+        assertEquals(connected, ServingCellSelector.select(listOf(idle, connected)).primary)
     }
 
     @Test

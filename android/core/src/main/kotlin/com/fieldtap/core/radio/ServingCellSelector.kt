@@ -21,8 +21,15 @@ internal data class ServingIndices(
  * Picks the serving cells and reads service state.
  *
  * [select]:
- * - Primary: the first cell with `connectionStatus == 1` (primary serving). When no cell reports a
- *   connection status at all (every value null), the first registered LTE or NR cell. Otherwise none.
+ * - Primary: the first cell with `connectionStatus == 1` (primary serving). When no cell says that,
+ *   the first registered LTE or NR cell that is not a secondary leg.
+ *
+ *   A registered cell is the one the phone is camped on; `connectionStatus` is the RRC state, and it
+ *   is PRIMARY_SERVING only while a connection is up. An idle phone — attached, moving no data, which
+ *   is most phones most of the time — reports CONNECTION_NONE on every cell, the camped one
+ *   included. This used to return no primary whenever any cell reported a status, which made FieldTap
+ *   say "no LTE or NR serving cell" on a OnePlus 10 Pro camped on PCI 1, EARFCN 3350, RSRP -91 dBm,
+ *   with VoLTE in its status bar.
  * - NSA secondary: when the primary is LTE, the first NR cell with `connectionStatus == 2`
  *   (secondary serving). Never when the primary is NR (SA) or absent.
  * - A GSM, WCDMA, TD-SCDMA or CDMA primary is returned, but never yields a kpi.csv row.
@@ -33,8 +40,8 @@ internal data class ServingIndices(
  *
  * [isOutOfService]: `OUT_OF_SERVICE` or `POWER_OFF`, and not emergency-only.
  *
- * Tests: NSA (LTE status 1, NR status 2, LTE neighbour status 0); SA; vendor without statuses;
- * two primaries (first wins); emergency-only with a registered NR cell.
+ * Tests: NSA (LTE status 1, NR status 2, LTE neighbour status 0); SA; vendor without statuses; an idle
+ * phone (every status 0); two primaries (first wins); emergency-only with a registered NR cell.
  *
  * Owner: workstream `radio-core`.
  */
@@ -70,7 +77,10 @@ object ServingCellSelector {
     private fun primaryIndex(cells: List<CellSnapshot>): Int? {
         val byStatus = cells.indexOfFirst { it.connectionStatus == CellSnapshot.CONNECTION_PRIMARY_SERVING }
         if (byStatus >= 0) return byStatus
-        if (cells.any { it.connectionStatus != null }) return null
-        return cells.indexOfFirst { it.registered && (it.rat == Rat.LTE || it.rat == Rat.NR) }.takeIf { it >= 0 }
+        return cells.indexOfFirst {
+            it.registered &&
+                (it.rat == Rat.LTE || it.rat == Rat.NR) &&
+                it.connectionStatus != CellSnapshot.CONNECTION_SECONDARY_SERVING
+        }.takeIf { it >= 0 }
     }
 }
