@@ -64,6 +64,9 @@ class LiveStateReducerTest {
                 operator = "Verizon",
                 connectionStatus = CellSnapshot.CONNECTION_PRIMARY_SERVING,
                 timestampMs = BOOT0,
+                // The Signal tab reads the tracking area and cell identity, so they reach the live view.
+                tac = 18_704,
+                cellId = 21_640_193L,
             ),
             state.serving,
         )

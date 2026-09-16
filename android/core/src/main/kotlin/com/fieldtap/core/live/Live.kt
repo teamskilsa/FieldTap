@@ -34,6 +34,14 @@ data class LiveCell(
     val connectionStatus: Int?,
     /** `timestampMs` of the measurement, to age it on every tick. */
     val timestampMs: Long,
+    // What the Signal tab shows beyond the headline three. Defaulted so a cell built for a chart or a
+    // test does not have to invent a tracking area.
+    val tac: Int? = null,
+    val cellId: Long? = null,
+    val bandwidthKhz: Int? = null,
+    val rssi: Int? = null,
+    val cqi: Int? = null,
+    val timingAdvance: Int? = null,
 ) {
     companion object {
         /**
@@ -47,7 +55,9 @@ data class LiveCell(
                 rat = cell.rat,
                 pci = cell.pci,
                 arfcn = cell.arfcn,
-                band = cell.bands.firstOrNull(),
+                // A modem reports -1 for a band it did not fill in (the OnePlus sends one copy of its
+                // serving cell with band 7 and another with -1). Not a band; the EARFCN can say which.
+                band = cell.bands.firstOrNull { it > 0 },
                 rsrp = cell.rsrp,
                 rsrq = cell.rsrq,
                 sinr = cell.sinr,
@@ -55,6 +65,12 @@ data class LiveCell(
                 operator = cell.operatorLong?.takeIf { it.isNotBlank() } ?: cell.operatorShort?.takeIf { it.isNotBlank() },
                 connectionStatus = cell.connectionStatus,
                 timestampMs = cell.timestampMs,
+                tac = cell.tac,
+                cellId = cell.cellId,
+                bandwidthKhz = cell.bandwidthKhz,
+                rssi = cell.rssi,
+                cqi = cell.cqi,
+                timingAdvance = cell.timingAdvance,
             )
         }
     }
