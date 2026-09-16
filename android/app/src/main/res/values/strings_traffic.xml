@@ -14,6 +14,7 @@
     <string name="traffic_host_hint" translatable="false">192.168.10.1</string>
     <string name="traffic_port">Port</string>
     <string name="traffic_iperf" translatable="false">iPerf3</string>
+    <string name="traffic_iperf2" translatable="false">iPerf2</string>
     <string name="traffic_ping">Ping</string>
     <string name="traffic_download">Download</string>
     <string name="traffic_upload">Upload</string>
@@ -64,6 +65,10 @@
     <!-- Why a run failed. %1$s is the host, %2$s the port. -->
     <string name="traffic_error_busy">%1$s is already running a test for someone else. Try again when it finishes.</string>
     <string name="traffic_error_refused">Nothing is listening on %1$s:%2$s. Is iperf3 -s running, and is the port open?</string>
+    <string name="traffic_error_refused_iperf2">Nothing is listening on %1$s:%2$s. Is iperf -s running there? iperf2 listens on 5001 unless told otherwise.</string>
+    <!-- %1$s is the server, %2$s the phone's own address on the bearer. -->
+    <string name="traffic_error_iperf2_no_reverse">%1$s accepted the download request but never sent. iperf2 servers older than 2.1 cannot send in reverse — upgrade it, or on the callbox run: iperf -c %2$s</string>
+    <string name="traffic_error_iperf2_no_report">The upload went out, but %1$s:%2$s never answered at the end, so there is no loss or jitter. Is iperf -s -u running on that port?</string>
     <string name="traffic_error_no_route">No route to %1$s over cellular. Check the PDN\'s routing on the callbox.</string>
     <string name="traffic_error_timeout">%1$s:%2$s did not answer.</string>
     <string name="traffic_error_broke_off">The iperf3 server broke off the test.</string>

@@ -5,15 +5,18 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fieldtap.R
-import com.fieldtap.core.nettest.Iperf3Direction
+import com.fieldtap.core.nettest.IperfDirection
+import com.fieldtap.core.nettest.Iperf2Failure
+import com.fieldtap.core.nettest.Iperf2Wire
 import com.fieldtap.core.nettest.Iperf3Failure
-import com.fieldtap.core.nettest.Iperf3Options
-import com.fieldtap.core.nettest.Iperf3Protocol
+import com.fieldtap.core.nettest.IperfOptions
+import com.fieldtap.core.nettest.IperfProtocol
 import com.fieldtap.core.nettest.NetFailure
 import com.fieldtap.core.nettest.PingOutcome
 import com.fieldtap.core.nettest.PingStats
 import com.fieldtap.nettest.CellularIperf3
 import com.fieldtap.nettest.CellularLink
+import com.fieldtap.nettest.IperfVersion
 import com.fieldtap.nettest.CellularNetworks
 import com.fieldtap.nettest.CellularTestTransport
 import com.fieldtap.nettest.cellularLinks
@@ -29,8 +32,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** What the Traffic tab can run. */
-enum class TrafficMode { IPERF, PING }
+/** What the Traffic tab can run. iperf2 and iperf3 are separate because their servers are. */
+enum class TrafficMode { IPERF3, IPERF2, PING;
+
+    val iperfVersion: IperfVersion? get() = when (this) {
+        IPERF3 -> IperfVersion.V3
+        IPERF2 -> IperfVersion.V2
+        PING -> null
+    }
+
+    /** The port a stock server of this kind listens on. */
+    val defaultPort: Int? get() = when (this) {
+        IPERF3 -> IperfOptions.DEFAULT_PORT
+        IPERF2 -> Iperf2Wire.DEFAULT_PORT
+        PING -> null
+    }
+}
+
+/** The shape of the run whose samples are on screen: its kind, and how many samples a full run has. */
+data class SampledRun(val mode: TrafficMode, val slots: Int)
 
 /** One finished run, for the result card and the history under it. */
 sealed interface TrafficResult {
@@ -38,12 +58,13 @@ sealed interface TrafficResult {
 
     data class Iperf(
         override val finishedAtMs: Long,
-        val options: Iperf3Options,
+        val version: IperfVersion,
+        val options: IperfOptions,
         val mbps: Double,
         val peakMbps: Double,
         val seconds: Double,
-        val sentBytes: Long,
-        val receivedBytes: Long,
+        val sentBytes: Long?,
+        val receivedBytes: Long?,
         val jitterMs: Double?,
         val lossPercent: Double?,
         val lostPackets: Long?,
@@ -66,10 +87,10 @@ sealed interface TrafficResult {
 
 data class TrafficUiState(
     val host: String = "",
-    val port: String = Iperf3Options.DEFAULT_PORT.toString(),
-    val mode: TrafficMode = TrafficMode.IPERF,
-    val protocol: Iperf3Protocol = Iperf3Protocol.TCP,
-    val direction: Iperf3Direction = Iperf3Direction.DOWNLOAD,
+    val port: String = Iperf2Wire.DEFAULT_PORT.toString(),
+    val mode: TrafficMode = TrafficMode.IPERF2,
+    val protocol: IperfProtocol = IperfProtocol.TCP,
+    val direction: IperfDirection = IperfDirection.DOWNLOAD,
     val durationSec: Int = 10,
     val parallel: Int = 1,
     val udpMbps: String = "10",
@@ -78,6 +99,12 @@ data class TrafficUiState(
     val running: Boolean = false,
     /** iPerf3: Mbps per second so far. Ping: round trip per echo so far, null where it was lost. */
     val samples: List<Double?> = emptyList(),
+    /**
+     * What produced [samples], fixed when the run starts. The live panel is labelled from this, never from
+     * the current selection: ten ping round trips, left on screen after switching to iPerf3, were drawn as
+     * "Throughput 19.5 Mbps · 10 / 60 s" — an iperf run that never happened, apparently dying at 10 s.
+     */
+    val sampled: SampledRun? = null,
     val result: TrafficResult? = null,
     val error: String? = null,
     val history: List<TrafficResult> = emptyList(),
@@ -88,7 +115,7 @@ data class TrafficUiState(
     /** Start is offered only for something that can run: a server, a port, and for UDP a rate. */
     val canStart: Boolean
         get() = !running && host.isNotBlank() &&
-            (mode == TrafficMode.PING || (portNumber != null && (protocol == Iperf3Protocol.TCP || udpBitrateBps != null)))
+            (mode == TrafficMode.PING || (portNumber != null && (protocol == IperfProtocol.TCP || udpBitrateBps != null)))
 }
 
 /**
@@ -117,9 +144,18 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
 
     fun setHost(value: String) = edit { it.copy(host = value.trim()) }
     fun setPort(value: String) = edit { it.copy(port = value.filter(Char::isDigit).take(5)) }
-    fun setMode(value: TrafficMode) = edit { it.copy(mode = value) }
-    fun setProtocol(value: Iperf3Protocol) = edit { it.copy(protocol = value) }
-    fun setDirection(value: Iperf3Direction) = edit { it.copy(direction = value) }
+    /**
+     * Switching between iperf2 and iperf3 moves the port with it when it was still the other one's default:
+     * 5001 and 5201 are easy to mix up, and an iperf3 client on an iperf2 port fails in a way that looks
+     * like the server is down.
+     */
+    fun setMode(value: TrafficMode) = edit { current ->
+        val otherDefault = current.mode.defaultPort?.toString()
+        val port = if (value.defaultPort != null && (current.port == otherDefault || current.port.isBlank())) value.defaultPort.toString() else current.port
+        current.copy(mode = value, port = port)
+    }
+    fun setProtocol(value: IperfProtocol) = edit { it.copy(protocol = value) }
+    fun setDirection(value: IperfDirection) = edit { it.copy(direction = value) }
     fun setDuration(value: Int) = edit { it.copy(durationSec = value) }
     fun setParallel(value: Int) = edit { it.copy(parallel = value) }
     fun setUdpMbps(value: String) = edit { it.copy(udpMbps = value.filter { c -> c.isDigit() || c == '.' }.take(6)) }
@@ -128,11 +164,14 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
     fun start() {
         val current = mutableState.value
         if (!current.canStart) return
-        mutableState.update { it.copy(running = true, samples = emptyList(), result = null, error = null) }
+        val slots = if (current.mode == TrafficMode.PING) current.pingCount else current.durationSec
+        mutableState.update {
+            it.copy(running = true, samples = emptyList(), sampled = SampledRun(current.mode, slots), result = null, error = null)
+        }
         job = viewModelScope.launch {
             try {
                 val result = when (current.mode) {
-                    TrafficMode.IPERF -> runIperf(current)
+                    TrafficMode.IPERF3, TrafficMode.IPERF2 -> runIperf(current)
                     TrafficMode.PING -> runPing(current)
                 }
                 mutableState.update {
@@ -157,24 +196,31 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun runIperf(s: TrafficUiState): TrafficResult? {
-        val options = Iperf3Options(
+        val options = IperfOptions(
             host = s.host,
             port = s.portNumber!!,
             protocol = s.protocol,
             direction = s.direction,
             durationSec = s.durationSec,
             parallel = s.parallel,
-            udpBitrateBps = s.udpBitrateBps ?: Iperf3Options("x").udpBitrateBps,
+            udpBitrateBps = s.udpBitrateBps ?: IperfOptions("x").udpBitrateBps,
         )
-        val result = iperf.run(options) { interval ->
+        val version = s.mode.iperfVersion!!
+        val result = iperf.run(s.mode.iperfVersion!!, options) { interval ->
             mutableState.update { it.copy(samples = it.samples + interval.mbps) }
         }
         if (result == null) {
             mutableState.update { it.copy(error = text(R.string.traffic_no_bearer)) }
             return null
         }
+        // iperf2 over UDP ends by asking the server for its report. No answer means it never heard the
+        // test — usually no `iperf -s -u` on that port, since UDP has no connection to be refused.
+        if (version == IperfVersion.V2 && options.protocol == IperfProtocol.UDP && options.direction == IperfDirection.UPLOAD && result.receivedBytes == null) {
+            mutableState.update { it.copy(error = text(R.string.traffic_error_iperf2_no_report, s.host, s.port)) }
+        }
         return TrafficResult.Iperf(
             finishedAtMs = System.currentTimeMillis(),
+            version = version,
             options = options,
             mbps = result.mbps,
             peakMbps = result.peakMbps,
@@ -228,8 +274,9 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
     /** Says what went wrong in the terms someone at a callbox would check next. */
     private fun describe(e: Exception, s: TrafficUiState): String = when (e) {
         is Iperf3Failure.Busy -> text(R.string.traffic_error_busy, s.host)
+        is Iperf2Failure.NoReverse -> text(R.string.traffic_error_iperf2_no_reverse, s.host, s.link.ipv4 ?: "<phone IP>")
         is Iperf3Failure -> e.message ?: text(R.string.traffic_error_broke_off)
-        is ConnectException -> text(R.string.traffic_error_refused, s.host, s.port)
+        is ConnectException -> text(if (s.mode == TrafficMode.IPERF2) R.string.traffic_error_refused_iperf2 else R.string.traffic_error_refused, s.host, s.port)
         is NoRouteToHostException -> text(R.string.traffic_error_no_route, s.host)
         is SocketTimeoutException -> text(R.string.traffic_error_timeout, s.host, s.port)
         else -> e.message ?: e.javaClass.simpleName
@@ -265,7 +312,8 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
         return d.copy(
             host = prefs.getString(K_HOST, d.host) ?: d.host,
             port = prefs.getString(K_PORT, d.port) ?: d.port,
-            mode = enumOr(prefs.getString(K_MODE, null), d.mode),
+            // "IPERF" from before iperf2 existed was iperf3.
+            mode = if (prefs.getString(K_MODE, null) == "IPERF") TrafficMode.IPERF3 else enumOr(prefs.getString(K_MODE, null), d.mode),
             protocol = enumOr(prefs.getString(K_PROTOCOL, null), d.protocol),
             direction = enumOr(prefs.getString(K_DIRECTION, null), d.direction),
             durationSec = prefs.getInt(K_DURATION, d.durationSec),

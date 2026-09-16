@@ -54,7 +54,7 @@ class Iperf3WireTest {
 
     @Test
     fun aDownloadIsAReverseTest() {
-        val params = Iperf3Wire.params(Iperf3Options("10.0.0.1", direction = Iperf3Direction.DOWNLOAD, durationSec = 5, parallel = 2))
+        val params = Iperf3Wire.params(IperfOptions("10.0.0.1", direction = IperfDirection.DOWNLOAD, durationSec = 5, parallel = 2))
         assertEquals(true, params["tcp"]!!.jsonPrimitive.boolean)
         assertEquals(true, params["reverse"]!!.jsonPrimitive.boolean)
         assertEquals(5, params["time"]!!.jsonPrimitive.int)
@@ -65,12 +65,12 @@ class Iperf3WireTest {
     @Test
     fun anUploadIsNotReversedAndUdpCarriesItsRate() {
         val params = Iperf3Wire.params(
-            Iperf3Options("10.0.0.1", protocol = Iperf3Protocol.UDP, direction = Iperf3Direction.UPLOAD, udpBitrateBps = 50_000_000),
+            IperfOptions("10.0.0.1", protocol = IperfProtocol.UDP, direction = IperfDirection.UPLOAD, udpBitrateBps = 50_000_000),
         )
         assertEquals(true, params["udp"]!!.jsonPrimitive.boolean)
         assertNull(params["reverse"])
         assertEquals(50_000_000L, params["bandwidth"]!!.jsonPrimitive.long)
-        assertEquals(Iperf3Options.UDP_BLOCK_BYTES, params["len"]!!.jsonPrimitive.int)
+        assertEquals(IperfOptions.UDP_BLOCK_BYTES, params["len"]!!.jsonPrimitive.int)
     }
 
     @Test
@@ -151,7 +151,7 @@ class Iperf3WireTest {
  */
 class Iperf3ClientTest {
 
-    private val loopback = object : Iperf3Connector {
+    private val loopback = object : IperfConnector {
         override fun openTcp(host: String, port: Int, timeoutMs: Int): Socket =
             Socket().apply { connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), timeoutMs) }
 
@@ -162,16 +162,16 @@ class Iperf3ClientTest {
     @Test
     fun aTcpDownloadReceivesWhatTheServerSends() = runBlocking {
         val server = FakeIperf3Server()
-        val intervals = mutableListOf<Iperf3Interval>()
+        val intervals = mutableListOf<IperfInterval>()
         val result = Iperf3Client(loopback).run(
-            Iperf3Options("localhost", server.port, Iperf3Protocol.TCP, Iperf3Direction.DOWNLOAD, durationSec = 2),
+            IperfOptions("localhost", server.port, IperfProtocol.TCP, IperfDirection.DOWNLOAD, durationSec = 2),
         ) { intervals += it }
         server.join()
 
         assertEquals("the params arrived as sent", true, server.params.get()!!["reverse"]!!.jsonPrimitive.boolean)
-        assertTrue("bytes flowed", result.receivedBytes > 0)
+        assertTrue("bytes flowed", result.receivedBytes!! > 0)
         assertEquals("the server's count is the sent side", server.sentBytes.get(), result.sentBytes)
-        assertTrue("the client counted no more than was sent", result.receivedBytes <= server.sentBytes.get())
+        assertTrue("the client counted no more than was sent", result.receivedBytes!! <= server.sentBytes.get())
         assertTrue("an interval a second", intervals.size in 1..3)
         assertTrue(result.mbps > 0)
         assertEquals(listOf("cookie", "params", "streams", "running", "end", "results", "done"), server.log)
@@ -181,19 +181,19 @@ class Iperf3ClientTest {
     fun aTcpUploadIsQuotedFromWhatTheServerReceived() = runBlocking {
         val server = FakeIperf3Server()
         val result = Iperf3Client(loopback).run(
-            Iperf3Options("localhost", server.port, Iperf3Protocol.TCP, Iperf3Direction.UPLOAD, durationSec = 1),
+            IperfOptions("localhost", server.port, IperfProtocol.TCP, IperfDirection.UPLOAD, durationSec = 1),
         )
         server.join()
         assertNull(server.params.get()!!["reverse"])
         assertEquals(server.receivedBytes.get(), result.receivedBytes)
-        assertTrue(result.sentBytes >= result.receivedBytes)
+        assertTrue(result.sentBytes!! >= result.receivedBytes!!)
     }
 
     @Test
     fun parallelTcpStreamsEachGetTheCookie() = runBlocking {
         val server = FakeIperf3Server()
         Iperf3Client(loopback).run(
-            Iperf3Options("localhost", server.port, Iperf3Protocol.TCP, Iperf3Direction.DOWNLOAD, durationSec = 1, parallel = 3),
+            IperfOptions("localhost", server.port, IperfProtocol.TCP, IperfDirection.DOWNLOAD, durationSec = 1, parallel = 3),
         )
         server.join()
         assertEquals(3, server.streamCookiesMatched.get().toInt())
@@ -203,7 +203,7 @@ class Iperf3ClientTest {
     fun aUdpDownloadCountsDatagramsAndLoss() = runBlocking {
         val server = FakeIperf3Server(udpDropEvery = 10)
         val result = Iperf3Client(loopback).run(
-            Iperf3Options("localhost", server.port, Iperf3Protocol.UDP, Iperf3Direction.DOWNLOAD, durationSec = 2, udpBitrateBps = 2_000_000),
+            IperfOptions("localhost", server.port, IperfProtocol.UDP, IperfDirection.DOWNLOAD, durationSec = 2, udpBitrateBps = 2_000_000),
         )
         server.join()
         assertTrue("datagrams arrived", (result.packets ?: 0) > 0)
@@ -216,7 +216,7 @@ class Iperf3ClientTest {
     fun aBusyServerIsReportedAsBusy() = runBlocking {
         val server = FakeIperf3Server(refuse = true)
         try {
-            Iperf3Client(loopback).run(Iperf3Options("localhost", server.port, durationSec = 1))
+            Iperf3Client(loopback).run(IperfOptions("localhost", server.port, durationSec = 1))
             fail("expected Busy")
         } catch (e: Iperf3Failure.Busy) {
             // expected
@@ -228,7 +228,7 @@ class Iperf3ClientTest {
     fun aServerThatHangsUpMidTestIsAServerError() = runBlocking {
         val server = FakeIperf3Server(hangUpAfterStart = true)
         try {
-            Iperf3Client(loopback).run(Iperf3Options("localhost", server.port, durationSec = 1))
+            Iperf3Client(loopback).run(IperfOptions("localhost", server.port, durationSec = 1))
             fail("expected ServerError")
         } catch (e: Iperf3Failure.ServerError) {
             // expected

@@ -48,8 +48,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fieldtap.R
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import com.fieldtap.core.nettest.Iperf3Direction
-import com.fieldtap.core.nettest.Iperf3Protocol
+import com.fieldtap.core.nettest.IperfDirection
+import com.fieldtap.core.nettest.IperfProtocol
+import com.fieldtap.nettest.IperfVersion
 import com.fieldtap.ui.components.FieldTapTopBar
 import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.theme.tabular
@@ -84,7 +85,11 @@ fun TrafficScreen(viewModel: TrafficViewModel, modifier: Modifier = Modifier) {
             item(key = "server") { ServerPanel(s, viewModel) }
             item(key = "mode") {
                 Segmented(
-                    options = listOf(TrafficMode.IPERF to stringResource(R.string.traffic_iperf), TrafficMode.PING to stringResource(R.string.traffic_ping)),
+                    options = listOf(
+                        TrafficMode.IPERF2 to stringResource(R.string.traffic_iperf2),
+                        TrafficMode.IPERF3 to stringResource(R.string.traffic_iperf),
+                        TrafficMode.PING to stringResource(R.string.traffic_ping),
+                    ),
                     selected = s.mode,
                     enabled = !s.running,
                     onSelect = viewModel::setMode,
@@ -92,12 +97,12 @@ fun TrafficScreen(viewModel: TrafficViewModel, modifier: Modifier = Modifier) {
             }
             item(key = "options") {
                 when (s.mode) {
-                    TrafficMode.IPERF -> IperfOptions(s, viewModel)
+                    TrafficMode.IPERF3, TrafficMode.IPERF2 -> IperfOptions(s, viewModel)
                     TrafficMode.PING -> PingOptions(s, viewModel)
                 }
             }
             item(key = "go") { StartStop(s, viewModel) }
-            if (s.running || s.samples.isNotEmpty()) item(key = "live") { LivePanel(s) }
+            s.sampled?.let { run -> if (s.running || s.samples.isNotEmpty()) item(key = "live") { LivePanel(s, run) } }
             s.error?.let { item(key = "error") { ErrorPanel(it) } }
             s.result?.let { item(key = "result") { ResultPanel(it) } }
             if (s.history.size > 1) {
@@ -156,7 +161,7 @@ private fun ServerPanel(s: TrafficUiState, vm: TrafficViewModel) {
                 textStyle = MaterialTheme.typography.bodyLarge.tabular(),
                 modifier = Modifier.weight(1f),
             )
-            if (s.mode == TrafficMode.IPERF) {
+            if (s.mode != TrafficMode.PING) {
                 OutlinedTextField(
                     value = s.port,
                     onValueChange = vm::setPort,
@@ -178,14 +183,14 @@ private fun IperfOptions(s: TrafficUiState, vm: TrafficViewModel) {
     Panel {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Segmented(
-                options = listOf(Iperf3Direction.DOWNLOAD to stringResource(R.string.traffic_download), Iperf3Direction.UPLOAD to stringResource(R.string.traffic_upload)),
+                options = listOf(IperfDirection.DOWNLOAD to stringResource(R.string.traffic_download), IperfDirection.UPLOAD to stringResource(R.string.traffic_upload)),
                 selected = s.direction,
                 enabled = !s.running,
                 onSelect = vm::setDirection,
                 modifier = Modifier.weight(1.4f),
             )
             Segmented(
-                options = listOf(Iperf3Protocol.TCP to "TCP", Iperf3Protocol.UDP to "UDP"),
+                options = listOf(IperfProtocol.TCP to "TCP", IperfProtocol.UDP to "UDP"),
                 selected = s.protocol,
                 enabled = !s.running,
                 onSelect = vm::setProtocol,
@@ -199,7 +204,7 @@ private fun IperfOptions(s: TrafficUiState, vm: TrafficViewModel) {
         OptionRow(stringResource(R.string.traffic_streams)) {
             Chips(listOf(1, 2, 4, 8), s.parallel, { "$it" }, !s.running, vm::setParallel)
         }
-        if (s.protocol == Iperf3Protocol.UDP) {
+        if (s.protocol == IperfProtocol.UDP) {
             OptionRow(stringResource(R.string.traffic_bitrate)) {
                 OutlinedTextField(
                     value = s.udpMbps,
@@ -248,8 +253,8 @@ private fun StartStop(s: TrafficUiState, vm: TrafficViewModel) {
 @Composable
 private fun startLabel(s: TrafficUiState): String = when (s.mode) {
     TrafficMode.PING -> if (s.host.isBlank()) stringResource(R.string.traffic_start_ping_blank) else stringResource(R.string.traffic_start_ping, s.host)
-    TrafficMode.IPERF -> stringResource(
-        if (s.direction == Iperf3Direction.DOWNLOAD) R.string.traffic_start_download else R.string.traffic_start_upload,
+    TrafficMode.IPERF3, TrafficMode.IPERF2 -> stringResource(
+        if (s.direction == IperfDirection.DOWNLOAD) R.string.traffic_start_download else R.string.traffic_start_upload,
         s.protocol.name,
     )
 }
@@ -257,8 +262,8 @@ private fun startLabel(s: TrafficUiState): String = when (s.mode) {
 // MARK: - Live and results
 
 @Composable
-private fun LivePanel(s: TrafficUiState) {
-    val iperf = s.mode == TrafficMode.IPERF
+private fun LivePanel(s: TrafficUiState, run: SampledRun) {
+    val iperf = run.mode != TrafficMode.PING
     val latest = s.samples.lastOrNull()
     Panel(title = stringResource(if (iperf) R.string.traffic_throughput else R.string.traffic_round_trip)) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -280,7 +285,7 @@ private fun LivePanel(s: TrafficUiState) {
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = if (iperf) stringResource(R.string.traffic_progress_seconds, s.samples.size, s.durationSec) else stringResource(R.string.traffic_progress, s.samples.size, s.pingCount),
+                text = if (iperf) stringResource(R.string.traffic_progress_seconds, s.samples.size, run.slots) else stringResource(R.string.traffic_progress, s.samples.size, run.slots),
                 modifier = Modifier.padding(bottom = 14.dp),
                 style = MaterialTheme.typography.labelLarge.tabular(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -288,7 +293,7 @@ private fun LivePanel(s: TrafficUiState) {
         }
         Bars(
             values = s.samples,
-            slots = if (iperf) s.durationSec else s.pingCount,
+            slots = run.slots,
             color = MaterialTheme.colorScheme.primary,
             lostColor = MaterialTheme.colorScheme.error,
         )
@@ -327,10 +332,10 @@ private fun ResultPanel(result: TrafficResult) {
     when (result) {
         is TrafficResult.Iperf -> {
             val o = result.options
-            val title = pluralStringResource(
+            val title = versionName(result.version) + " · " + pluralStringResource(
                 R.plurals.traffic_result_title,
                 o.parallel,
-                stringResource(if (o.direction == Iperf3Direction.DOWNLOAD) R.string.traffic_download else R.string.traffic_upload),
+                stringResource(if (o.direction == IperfDirection.DOWNLOAD) R.string.traffic_download else R.string.traffic_upload),
                 o.protocol.name,
                 o.parallel,
             )
@@ -343,9 +348,10 @@ private fun ResultPanel(result: TrafficResult) {
                 val rows = buildList {
                     add(stringResource(R.string.traffic_peak) to "${fmt(result.peakMbps, 1)} " + stringResource(R.string.traffic_mbps))
                     add(stringResource(R.string.traffic_duration) to "${fmt(result.seconds, 1)} s")
-                    add(stringResource(R.string.traffic_received) to bytes(result.receivedBytes))
-                    add(stringResource(R.string.traffic_sent) to bytes(result.sentBytes))
-                    if (o.protocol == Iperf3Protocol.UDP) {
+                    // A count the far end did not report is shown as unknown, never as a guess.
+                    add(stringResource(R.string.traffic_received) to (result.receivedBytes?.let(::bytes) ?: "—"))
+                    add(stringResource(R.string.traffic_sent) to (result.sentBytes?.let(::bytes) ?: "—"))
+                    if (o.protocol == IperfProtocol.UDP) {
                         add(stringResource(R.string.traffic_jitter) to (result.jitterMs?.let { "${fmt(it, 2)} ms" } ?: "—"))
                         add(stringResource(R.string.traffic_loss) to (result.lossPercent?.let { "${fmt(it, 2)} %  (${result.lostPackets}/${result.packets})" } ?: "—"))
                     }
@@ -386,7 +392,7 @@ private fun HistoryRow(result: TrafficResult) {
     val (what, value) = when (result) {
         is TrafficResult.Iperf -> {
             val o = result.options
-            "${stringResource(if (o.direction == Iperf3Direction.DOWNLOAD) R.string.traffic_dl else R.string.traffic_ul)} ${o.protocol.name} ×${o.parallel}" to "${fmt(result.mbps, 1)} " + stringResource(R.string.traffic_mbps)
+            "${versionName(result.version)} ${stringResource(if (o.direction == IperfDirection.DOWNLOAD) R.string.traffic_dl else R.string.traffic_ul)} ${o.protocol.name} ×${o.parallel}" to "${fmt(result.mbps, 1)} " + stringResource(R.string.traffic_mbps)
         }
 
         is TrafficResult.Ping -> stringResource(R.string.traffic_ping_to, result.host) to "${result.avgMs?.let { fmt(it, 1) } ?: "—"} ms · ${fmt(result.lossPercent, 0)}%"
@@ -517,6 +523,10 @@ private fun Panel(title: String? = null, accent: Color? = null, content: @Compos
         }
     }
 }
+
+@Composable
+private fun versionName(version: IperfVersion): String =
+    stringResource(if (version == IperfVersion.V2) R.string.traffic_iperf2 else R.string.traffic_iperf)
 
 private fun fmt(value: Double, decimals: Int): String = String.format(Locale.ROOT, "%.${decimals}f", value)
 

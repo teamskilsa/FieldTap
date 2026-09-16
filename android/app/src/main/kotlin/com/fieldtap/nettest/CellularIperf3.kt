@@ -6,12 +6,13 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import com.fieldtap.core.nettest.Iperf2Client
 import com.fieldtap.core.nettest.Iperf3Client
-import com.fieldtap.core.nettest.Iperf3Connector
+import com.fieldtap.core.nettest.IperfConnector
 import com.fieldtap.core.nettest.Iperf3Failure
-import com.fieldtap.core.nettest.Iperf3Interval
-import com.fieldtap.core.nettest.Iperf3Options
-import com.fieldtap.core.nettest.Iperf3Result
+import com.fieldtap.core.nettest.IperfInterval
+import com.fieldtap.core.nettest.IperfOptions
+import com.fieldtap.core.nettest.IperfResult
 import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetSocketAddress
@@ -23,7 +24,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Sockets on the cellular network, for [Iperf3Client].
+ * Sockets on the cellular network, for [Iperf3Client] and [Iperf2Client].
  *
  * `Network.socketFactory` and `Network.bindSocket` pin a socket to one network regardless of the default
  * route. In a lab the phone is usually on the building's Wi-Fi too, and an iperf3 test that quietly went
@@ -32,7 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * The server's address is resolved through the cellular network's own DNS, so a callbox that hands out a
  * name for its iperf3 host is honoured; an IP literal needs no lookup at all.
  */
-class NetworkIperf3Connector(private val network: Network) : Iperf3Connector {
+class NetworkIperf3Connector(private val network: Network) : IperfConnector {
     override fun openTcp(host: String, port: Int, timeoutMs: Int): Socket {
         val socket = network.socketFactory.createSocket()
         socket.connect(InetSocketAddress(resolve(host), port), timeoutMs)
@@ -53,12 +54,21 @@ class NetworkIperf3Connector(private val network: Network) : Iperf3Connector {
     }
 }
 
-/** Runs an iperf3 test on the cellular network, or reports that there is none. */
+/** Which iperf a server speaks. They are not compatible with each other. */
+enum class IperfVersion { V2, V3 }
+
+/** Runs an iperf test on the cellular network, or reports that there is none. */
 class CellularIperf3(private val networks: CellularNetworks) {
     /** Null when no cellular data network came up in time. */
-    suspend fun run(options: Iperf3Options, onInterval: (Iperf3Interval) -> Unit): Iperf3Result? =
+    suspend fun run(version: IperfVersion, options: IperfOptions, onInterval: (IperfInterval) -> Unit): IperfResult? =
         networks.withCellular(NETWORK_TIMEOUT_MS) { network ->
-            network?.let { Iperf3Client(NetworkIperf3Connector(it)).run(options, onInterval) }
+            network?.let {
+                val connector = NetworkIperf3Connector(it)
+                when (version) {
+                    IperfVersion.V3 -> Iperf3Client(connector).run(options, onInterval)
+                    IperfVersion.V2 -> Iperf2Client(connector).run(options, onInterval)
+                }
+            }
         }
 
     private companion object {

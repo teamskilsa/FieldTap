@@ -40,7 +40,7 @@ import kotlinx.serialization.json.put
  * Written rather than bundled. The alternative is shipping a native iperf3 binary per ABI and running it
  * as a child process, which cannot bind to the cellular network: it would go out over whatever Android
  * picked as the default, which in a lab is usually the Wi-Fi. A client in the app opens its sockets
- * through [Iperf3Connector], and the Android connector opens them on the cellular `Network` — so the
+ * through [IperfConnector], and the Android connector opens them on the cellular `Network` — so the
  * throughput measured is the callbox's, not the building's.
  *
  * The protocol, as `iperf3` 3.x speaks it:
@@ -58,21 +58,21 @@ import kotlinx.serialization.json.put
  *
  * Owner: workstream `service-and-tests`.
  */
-enum class Iperf3Protocol { TCP, UDP }
+enum class IperfProtocol { TCP, UDP }
 
 /** Which way the data goes. UPLOAD is iperf3's default; DOWNLOAD is `-R`, the server sending. */
-enum class Iperf3Direction { UPLOAD, DOWNLOAD }
+enum class IperfDirection { UPLOAD, DOWNLOAD }
 
-data class Iperf3Options(
+data class IperfOptions(
     val host: String,
     val port: Int = DEFAULT_PORT,
-    val protocol: Iperf3Protocol = Iperf3Protocol.TCP,
-    val direction: Iperf3Direction = Iperf3Direction.DOWNLOAD,
+    val protocol: IperfProtocol = IperfProtocol.TCP,
+    val direction: IperfDirection = IperfDirection.DOWNLOAD,
     val durationSec: Int = 10,
     val parallel: Int = 1,
     /** UDP only: the target rate, bits per second, across all streams. TCP ignores it and runs flat out. */
     val udpBitrateBps: Long = 10_000_000,
-    val blockSize: Int = if (protocol == Iperf3Protocol.TCP) TCP_BLOCK_BYTES else UDP_BLOCK_BYTES,
+    val blockSize: Int = if (protocol == IperfProtocol.TCP) TCP_BLOCK_BYTES else UDP_BLOCK_BYTES,
 ) {
     companion object {
         const val DEFAULT_PORT: Int = 5201
@@ -89,24 +89,28 @@ data class Iperf3Options(
 }
 
 /** One second of a test, as the client saw it. */
-data class Iperf3Interval(val startSec: Double, val endSec: Double, val bytes: Long) {
+data class IperfInterval(val startSec: Double, val endSec: Double, val bytes: Long) {
     val mbps: Double get() = bytes * 8.0 / (endSec - startSec).coerceAtLeast(MIN_SECONDS) / 1_000_000.0
 }
 
-data class Iperf3Result(
-    val options: Iperf3Options,
+data class IperfResult(
+    val options: IperfOptions,
     val seconds: Double,
-    /** What left the sender. */
-    val sentBytes: Long,
-    /** What arrived. Throughput is quoted from this, as iperf3's own "receiver" line is. */
-    val receivedBytes: Long,
-    val intervals: List<Iperf3Interval>,
+    /** What left the sender. Null when the far end sent and did not say how much (iperf2 downloads). */
+    val sentBytes: Long?,
+    /**
+     * What arrived. Throughput is quoted from this, as iperf's own "receiver" line is. Null when the far end
+     * received and did not say (an iperf2 TCP upload, which returns no report); then throughput is quoted
+     * from what was sent, as iperf2's own client does.
+     */
+    val receivedBytes: Long?,
+    val intervals: List<IperfInterval>,
     /** UDP only. */
     val jitterMs: Double? = null,
     val lostPackets: Long? = null,
     val packets: Long? = null,
 ) {
-    val mbps: Double get() = receivedBytes * 8.0 / seconds.coerceAtLeast(MIN_SECONDS) / 1_000_000.0
+    val mbps: Double get() = (receivedBytes ?: sentBytes ?: 0L) * 8.0 / seconds.coerceAtLeast(MIN_SECONDS) / 1_000_000.0
     val peakMbps: Double get() = intervals.maxOfOrNull { it.mbps } ?: 0.0
     val lossPercent: Double? get() = if (packets != null && lostPackets != null && packets > 0) lostPackets * 100.0 / packets else null
 }
@@ -124,7 +128,7 @@ sealed class Iperf3Failure(message: String) : IOException(message) {
 }
 
 /** Where the sockets come from. Android opens them on the cellular network; a test opens them on loopback. */
-interface Iperf3Connector {
+interface IperfConnector {
     fun openTcp(host: String, port: Int, timeoutMs: Int): Socket
 
     /** A UDP socket connected to [host]:[port]. */
@@ -179,19 +183,19 @@ object Iperf3Wire {
     }
 
     /** The parameters a stock server reads. Only what differs from its defaults is worth arguing about, but it does no harm to be explicit. */
-    fun params(options: Iperf3Options): JsonObject = buildJsonObject {
+    fun params(options: IperfOptions): JsonObject = buildJsonObject {
         when (options.protocol) {
-            Iperf3Protocol.TCP -> put("tcp", true)
-            Iperf3Protocol.UDP -> put("udp", true)
+            IperfProtocol.TCP -> put("tcp", true)
+            IperfProtocol.UDP -> put("udp", true)
         }
         put("omit", 0)
         put("time", options.durationSec)
         put("num", 0)
         put("blockcount", 0)
         put("parallel", options.parallel)
-        if (options.direction == Iperf3Direction.DOWNLOAD) put("reverse", true)
+        if (options.direction == IperfDirection.DOWNLOAD) put("reverse", true)
         put("len", options.blockSize)
-        if (options.protocol == Iperf3Protocol.UDP) put("bandwidth", options.udpBitrateBps)
+        if (options.protocol == IperfProtocol.UDP) put("bandwidth", options.udpBitrateBps)
         put("pacing_timer", 1000)
         put("client_version", CLIENT_VERSION)
     }
@@ -301,7 +305,7 @@ class UdpReceiveStats {
 }
 
 class Iperf3Client(
-    private val connector: Iperf3Connector,
+    private val connector: IperfConnector,
     private val random: Random = Random(SecureRandom().nextLong()),
     private val nowMicros: () -> Long = { System.nanoTime() / 1_000 },
 ) {
@@ -311,7 +315,7 @@ class Iperf3Client(
      * Cancelling the coroutine closes every socket, which the server sees as the client going away —
      * the same thing a Ctrl-C on a desktop iperf3 does.
      */
-    suspend fun run(options: Iperf3Options, onInterval: (Iperf3Interval) -> Unit = {}): Iperf3Result =
+    suspend fun run(options: IperfOptions, onInterval: (IperfInterval) -> Unit = {}): IperfResult =
         withContext(Dispatchers.IO) {
             val control = connector.openTcp(options.host, options.port, CONNECT_TIMEOUT_MS)
             val dataSockets = mutableListOf<AutoCloseable>()
@@ -330,8 +334,8 @@ class Iperf3Client(
 
                 val streams = (0 until options.parallel.coerceIn(1, MAX_STREAMS)).map {
                     when (options.protocol) {
-                        Iperf3Protocol.TCP -> DataStream.Tcp(openTcpStream(options, cookie)).also { dataSockets += it.socket }
-                        Iperf3Protocol.UDP -> DataStream.Udp(openUdpStream(options)).also { dataSockets += it.socket }
+                        IperfProtocol.TCP -> DataStream.Tcp(openTcpStream(options, cookie)).also { dataSockets += it.socket }
+                        IperfProtocol.UDP -> DataStream.Udp(openUdpStream(options)).also { dataSockets += it.socket }
                     }
                 }
 
@@ -351,8 +355,8 @@ class Iperf3Client(
                 output.flush()
 
                 val clientBytes = measured.streams.sumOf { it.bytes }
-                if (options.direction == Iperf3Direction.UPLOAD) {
-                    Iperf3Result(
+                if (options.direction == IperfDirection.UPLOAD) {
+                    IperfResult(
                         options = options,
                         seconds = measured.seconds,
                         sentBytes = clientBytes,
@@ -363,8 +367,8 @@ class Iperf3Client(
                         packets = server.packets,
                     )
                 } else {
-                    val udp = options.protocol == Iperf3Protocol.UDP
-                    Iperf3Result(
+                    val udp = options.protocol == IperfProtocol.UDP
+                    IperfResult(
                         options = options,
                         seconds = measured.seconds,
                         sentBytes = server.bytes,
@@ -390,16 +394,16 @@ class Iperf3Client(
         class Udp(override val socket: DatagramSocket) : DataStream
     }
 
-    private class Measured(val streams: List<StreamTotals>, val intervals: List<Iperf3Interval>, val seconds: Double)
+    private class Measured(val streams: List<StreamTotals>, val intervals: List<IperfInterval>, val seconds: Double)
 
-    private fun openTcpStream(options: Iperf3Options, cookie: ByteArray): Socket {
+    private fun openTcpStream(options: IperfOptions, cookie: ByteArray): Socket {
         val socket = connector.openTcp(options.host, options.port, CONNECT_TIMEOUT_MS)
         socket.tcpNoDelay = true
         socket.getOutputStream().apply { write(cookie); flush() }
         return socket
     }
 
-    private fun openUdpStream(options: Iperf3Options): DatagramSocket {
+    private fun openUdpStream(options: IperfOptions): DatagramSocket {
         val socket = connector.openUdp(options.host, options.port)
         socket.soTimeout = UDP_HELLO_TIMEOUT_MS
         val hello = Iperf3Wire.nativeInt(Iperf3Wire.UDP_CONNECT_MSG)
@@ -416,16 +420,16 @@ class Iperf3Client(
 
     /** Moves data for the test's duration, one worker per stream, sampling byte counts once a second. */
     private suspend fun transfer(
-        options: Iperf3Options,
+        options: IperfOptions,
         streams: List<DataStream>,
-        onInterval: (Iperf3Interval) -> Unit,
+        onInterval: (IperfInterval) -> Unit,
     ): Measured = coroutineScope {
         val counters = streams.map { AtomicLong(0) }
         val udpStats = streams.map { UdpReceiveStats() }
         val udpSent = streams.map { AtomicLong(0) }
         val started = nowMicros()
         val endAt = started + options.durationSec * 1_000_000L
-        val upload = options.direction == Iperf3Direction.UPLOAD
+        val upload = options.direction == IperfDirection.UPLOAD
 
         val workers = streams.mapIndexed { index, stream ->
             launch(Dispatchers.IO) {
@@ -440,14 +444,14 @@ class Iperf3Client(
             }
         }
 
-        val intervals = mutableListOf<Iperf3Interval>()
+        val intervals = mutableListOf<IperfInterval>()
         var lastBytes = 0L
         var lastMicros = started
         while (isActive && nowMicros() < endAt) {
             delay(INTERVAL_MS)
             val now = minOf(nowMicros(), endAt)
             val total = counters.sumOf { it.get() }
-            val interval = Iperf3Interval((lastMicros - started) / 1e6, (now - started) / 1e6, total - lastBytes)
+            val interval = IperfInterval((lastMicros - started) / 1e6, (now - started) / 1e6, total - lastBytes)
             if (interval.endSec > interval.startSec) {
                 intervals += interval
                 onInterval(interval)
@@ -468,7 +472,7 @@ class Iperf3Client(
         Measured(totals, intervals, seconds)
     }
 
-    private fun tcpSend(socket: Socket, options: Iperf3Options, counter: AtomicLong, endAt: Long) {
+    private fun tcpSend(socket: Socket, options: IperfOptions, counter: AtomicLong, endAt: Long) {
         val block = ByteArray(options.blockSize).also { random.nextBytes(it) }
         val out = socket.getOutputStream()
         try {
@@ -501,7 +505,7 @@ class Iperf3Client(
 
     private suspend fun udpSend(
         socket: DatagramSocket,
-        options: Iperf3Options,
+        options: IperfOptions,
         counter: AtomicLong,
         sent: AtomicLong,
         endAt: Long,
@@ -529,7 +533,7 @@ class Iperf3Client(
         }
     }
 
-    private fun udpReceive(socket: DatagramSocket, options: Iperf3Options, counter: AtomicLong, stats: UdpReceiveStats, endAt: Long) {
+    private fun udpReceive(socket: DatagramSocket, options: IperfOptions, counter: AtomicLong, stats: UdpReceiveStats, endAt: Long) {
         socket.soTimeout = READ_POLL_MS
         val buffer = ByteArray(maxOf(options.blockSize, Iperf3Wire.UDP_HEADER_BYTES) + 64)
         val packet = DatagramPacket(buffer, buffer.size)
