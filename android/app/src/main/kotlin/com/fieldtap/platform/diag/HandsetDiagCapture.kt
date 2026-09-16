@@ -95,9 +95,18 @@ class HandsetDiagCapture(
     suspend fun isRunning(): Boolean = runInterruptible(Dispatchers.IO) { running() }
 
     /** Stops the logger. Idempotent. */
+    /**
+     * Stops the logger and returns once it has exited. Idempotent.
+     *
+     * `diag_mdlog -k` asks the logger to stop; it does not wait for it. The logger holds its last buffer of
+     * log packets until it shuts down and writes them out on the way — measured on the OnePlus 10 Pro,
+     * the file grew by 42 KB about 2.5 s after `-k` and the process was gone at 3.5 s. That buffer is the
+     * signalling. This used to wait a fixed 1.5 s and copy, then delete the directory before the buffer
+     * landed, so every capture kept the modem's message database and lost every RRC and NAS message in it.
+     */
     suspend fun stop(): DiagCaptureResult = runInterruptible(Dispatchers.IO) {
         run("$LOGGER -k")
-        Thread.sleep(SETTLE_MS)
+        awaitExit(isRunning = ::running, timeoutMs = STOP_TIMEOUT_MS, pollMs = STOP_POLL_MS, sleep = Thread::sleep, nowMs = System::currentTimeMillis)
         DiagCaptureResult.Stopped(null)
     }
 
@@ -135,6 +144,29 @@ class HandsetDiagCapture(
     private companion object {
         const val LOGGER = "/vendor/bin/diag_mdlog"
         const val SETTLE_MS = 1_500L
+
+        /** How long a stopping logger gets to flush and exit. It took 3.5 s on the bench; this allows for a busy phone. */
+        const val STOP_TIMEOUT_MS = 20_000L
+        const val STOP_POLL_MS = 250L
         const val TAG = "HandsetDiagCapture"
     }
+}
+
+/**
+ * Waits until [isRunning] says false, or [timeoutMs] passes. True when it stopped in time. Pure, with the
+ * clock and the sleep handed in, so its timing is tested without a phone or a real process.
+ */
+internal fun awaitExit(
+    isRunning: () -> Boolean,
+    timeoutMs: Long,
+    pollMs: Long,
+    sleep: (Long) -> Unit,
+    nowMs: () -> Long,
+): Boolean {
+    val deadline = nowMs() + timeoutMs
+    while (isRunning()) {
+        if (nowMs() >= deadline) return false
+        sleep(pollMs)
+    }
+    return true
 }
