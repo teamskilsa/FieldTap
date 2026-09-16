@@ -137,6 +137,7 @@ object SessionEvents {
     const val MARKER_TITLE: String = "Marker"
     const val PING_FAILED_TITLE: String = "Ping failed"
     const val DOWNLOAD_FAILED_TITLE: String = "Download failed"
+    const val UPLOAD_FAILED_TITLE: String = "Upload failed"
     const val INTERRUPTED_TITLE: String = "Session interrupted"
     const val INTERRUPTED_DETAIL: String = "Android stopped the app"
 
@@ -161,6 +162,7 @@ object SessionEvents {
         title = when (test) {
             TrafficTest.PING -> PING_FAILED_TITLE
             TrafficTest.DOWNLOAD -> DOWNLOAD_FAILED_TITLE
+            TrafficTest.UPLOAD -> UPLOAD_FAILED_TITLE
         },
         detail = error.trim().takeIf { it.isNotEmpty() },
     )

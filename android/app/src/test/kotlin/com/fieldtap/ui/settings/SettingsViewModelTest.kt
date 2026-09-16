@@ -43,9 +43,9 @@ class SettingsViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf(home), viewModel.state.value.settings?.zones)
 
-        graph.fakeSettings.stored.value = graph.fakeSettings.stored.value.copy(walkModeDefault = true)
+        graph.fakeSettings.stored.value = graph.fakeSettings.stored.value.copy(testsDefaultOn = true)
         advanceUntilIdle()
-        assertEquals(true, viewModel.state.value.settings?.walkModeDefault)
+        assertEquals(true, viewModel.state.value.settings?.testsDefaultOn)
         assertFalse(viewModel.loadFailed.value)
     }
 
@@ -210,15 +210,12 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         viewModel.setTestsDefaultOn(true)
-        viewModel.setWalkModeDefault(true)
         advanceUntilIdle()
         assertTrue(graph.fakeSettings.stored.value.testsDefaultOn)
-        assertTrue(graph.fakeSettings.stored.value.walkModeDefault)
 
         viewModel.setTestsDefaultOn(false)
         advanceUntilIdle()
         assertFalse(graph.fakeSettings.stored.value.testsDefaultOn)
-        assertTrue(graph.fakeSettings.stored.value.walkModeDefault)
     }
 
     @Test
@@ -296,14 +293,14 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         graph.fakeSettings.failure = IOException("disk full")
-        viewModel.setWalkModeDefault(true)
+        viewModel.setTestsDefaultOn(true)
         advanceUntilIdle()
         graph.fakeSettings.failure = IllegalStateException("store closed")
         viewModel.saveZone(home)
         advanceUntilIdle()
 
         assertEquals(listOf<SettingsEvent>(SettingsEvent.SaveFailed, SettingsEvent.SaveFailed), events)
-        assertFalse(graph.fakeSettings.stored.value.walkModeDefault)
+        assertFalse(graph.fakeSettings.stored.value.testsDefaultOn)
         assertTrue(graph.fakeSettings.stored.value.zones.isEmpty())
     }
 

@@ -32,8 +32,6 @@ data class AppSettings(
     val consent: ConsentRecord? = null,
     val tests: TestSettings = TestSettings(),
     val zones: List<PrivacyZone> = emptyList(),
-    /** Whether the Live screen's walk-mode toggle starts on. */
-    val walkModeDefault: Boolean = false,
     /** Whether the Start dialog's "run ping and download tests" starts ticked. Off by default. */
     val testsDefaultOn: Boolean = false,
     /** When the readiness check last ran; see `ReadinessPolicy.requiredBeforeSession`. */
@@ -52,7 +50,7 @@ data class AppSettings(
  * `settings_version`, `install_id`, `consent` {`version`, `sha256`, `granted_utc_ms`} or null,
  * `tests` {`ping_target`, `ping_interval_ms`, `ping_count`, `ping_timeout_ms`, `download_url`,
  * `download_interval_ms`, `download_cap_bytes`, `session_budget_bytes`}, `zones`
- * [{`id`, `label`, `lat`, `lon`, `radius_m`}], `walk_mode_default`, `tests_default_on`,
+ * [{`id`, `label`, `lat`, `lon`, `radius_m`}], `tests_default_on`,
  * `readiness_last_run_utc_ms`, `last_session_started_utc_ms`.
  *
  * Decoding field by field:
@@ -100,7 +98,6 @@ object AppSettingsCodec {
                 }
             }
         }
-        put(WALK_MODE_DEFAULT, settings.walkModeDefault)
         put(TESTS_DEFAULT_ON, settings.testsDefaultOn)
         put(READINESS_LAST_RUN_UTC_MS, settings.readinessLastRunUtcMs)
         put(LAST_SESSION_STARTED_UTC_MS, settings.lastSessionStartedUtcMs)
@@ -115,7 +112,6 @@ object AppSettingsCodec {
             consent = root.obj(CONSENT)?.let { decodeConsent(it) },
             tests = root.obj(TESTS)?.let { decodeTests(it) } ?: TestSettings(),
             zones = root.array(ZONES)?.mapNotNull { element -> (element as? JsonObject)?.let { decodeZone(it) } }.orEmpty(),
-            walkModeDefault = root.boolean(WALK_MODE_DEFAULT) ?: false,
             testsDefaultOn = root.boolean(TESTS_DEFAULT_ON) ?: false,
             readinessLastRunUtcMs = root.long(READINESS_LAST_RUN_UTC_MS),
             lastSessionStartedUtcMs = root.long(LAST_SESSION_STARTED_UTC_MS),
@@ -218,7 +214,6 @@ object AppSettingsCodec {
     private const val ZONE_LAT = "lat"
     private const val ZONE_LON = "lon"
     private const val ZONE_RADIUS_M = "radius_m"
-    private const val WALK_MODE_DEFAULT = "walk_mode_default"
     private const val TESTS_DEFAULT_ON = "tests_default_on"
     private const val READINESS_LAST_RUN_UTC_MS = "readiness_last_run_utc_ms"
     private const val LAST_SESSION_STARTED_UTC_MS = "last_session_started_utc_ms"

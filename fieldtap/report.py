@@ -458,8 +458,10 @@ def build(session_dir: str, tshark: Optional[str] = None, log=lambda s: None, re
 _CSS = """
 body{font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f7f8fa;color:#222}
 header{background:#1f2d3d;color:#fff;padding:18px 28px}header h1{margin:0;font-size:22px;font-weight:600}
-header .sub{opacity:.85;margin-top:4px;font-size:13px}main{padding:18px 28px;max-width:1080px}
-section{background:#fff;border:1px solid #e3e6ea;border-radius:6px;padding:14px 18px;margin:0 0 16px}
+header .sub{opacity:.85;margin-top:4px;font-size:13px}main{padding:18px 28px;max-width:1080px;margin:0 auto}
+/* A wide table scrolls inside its own card; the page itself never scrolls sideways. */
+section{background:#fff;border:1px solid #e3e6ea;border-radius:6px;padding:14px 18px;margin:0 0 16px;overflow-x:auto}
+@media(max-width:600px){header{padding:14px 12px}main{padding:14px 12px}section{padding:12px}}
 h2{font-size:16px;margin:0 0 10px;color:#1f2d3d}table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid #eee;vertical-align:top}th{background:#f1f3f6;font-weight:600}
 .tiles{display:flex;flex-wrap:wrap;gap:10px}.tile{flex:1 1 150px;background:#f1f3f6;border-radius:6px;padding:10px 12px}
@@ -471,6 +473,34 @@ pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;overflow:aut
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:800px){.grid2{grid-template-columns:1fr}}
 footer{padding:10px 28px 24px;color:#777;font-size:12px}
 """
+
+
+def _hhmmss(value):
+    """The time of day out of an ISO timestamp, as the events table shows it. The date is in the
+    header, and repeating it in every row of every table buys nothing. Anything that is not an ISO
+    timestamp is passed through untouched."""
+    text = "" if value is None else str(value)
+    if len(text) >= 19 and text[10:11] == "T":
+        return text[11:23].rstrip(".")
+    return text
+
+
+def _transport_text(value):
+    """The transport as a phrase. A replayed file is named, never located: the report is meant to be
+    shared, and the path to it says more about the machine that read it than about the capture."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return str(value)
+    name = value.get("transport") or "unknown"
+    if name == "file":
+        path = value.get("path")
+        return "%s (%s)" % (name, os.path.basename(path)) if path else name
+    app = value.get("app")
+    version = value.get("app_version")
+    if app:
+        return "%s (%s %s)" % (name, app, version) if version else "%s (%s)" % (name, app)
+    return name
 
 
 def _tile(label, value, cls=""):
@@ -546,7 +576,7 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
             _tile("share below -105 dBm", ("%.1f%%" % below) if below is not None else "-",
                   "bad" if (below or 0) > 10 else ""),
             _tile("serving cells", len(cells)),
-            _tile("operators", ", ".join(plmns_seen) or "-"),
+            _tile("PLMN", ", ".join(plmns_seen) or "-"),
         ]
         if events:
             tiles.append(_tile("events (errors / warnings)", "%d (%d / %d)" % (ev["events"], ev["errors"], ev["warnings"]),
@@ -555,6 +585,8 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         tiles.append(_tile("ping avg / loss", "%s ms / %s%%" % (_fmt(traffic_sum["ping"]["rtt_avg_ms"]), _fmt(traffic_sum["ping"]["loss_pct_avg"]))))
     if traffic_sum.get("download"):
         tiles.append(_tile("download avg / max", "%s / %s Mbit/s" % (_fmt(traffic_sum["download"]["mbps_avg"], 1), _fmt(traffic_sum["download"]["mbps_max"], 1))))
+    if traffic_sum.get("upload"):
+        tiles.append(_tile("upload avg / max", "%s / %s Mbit/s" % (_fmt(traffic_sum["upload"]["mbps_avg"], 1), _fmt(traffic_sum["upload"]["mbps_max"], 1))))
     if summary["gps"]["fixes"]:
         tiles.append(_tile("GPS fixes / distance", "%d / %.2f km" % (summary["gps"]["fixes"], summary["gps"]["distance_km"])))
 
@@ -638,8 +670,17 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
         events_html += ('<p class="muted">%d more events are not listed here; %s has all %d.</p>'
                         % (left_out, EVENTS_FILE, len(events)))
 
-    cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(c.get(k, "")) for k in
-                                                ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz"))
+    _CELL_KEYS = ("first_seen_utc", "rat", "plmn", "tac", "enb_id", "sector", "pci", "band", "dl_earfcn", "dl_bw_mhz")
+
+    def _cell_cell(c, k):
+        value = c.get(k, "")
+        if k == "first_seen_utc":
+            return _hhmmss(value)
+        if k == "rat":
+            return str(value).upper()
+        return value
+
+    cell_rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _esc(_cell_cell(c, k)) for k in _CELL_KEYS)
                         for c in cells)
     cells_html = ("<table><tr><th>first seen</th><th>RAT</th><th>PLMN</th><th>TAC</th><th>eNB</th><th>sector</th><th>PCI</th><th>band</th><th>DL EARFCN</th><th>BW MHz</th></tr>%s</table>" % cell_rows) if cells else '<p class="muted">No serving-cell records%s in this session.</p>' % (" (log code 0xB0C2)" if has_signalling else "")
 
@@ -672,7 +713,7 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
     for label, value in (("Handset", handset_line), ("Android", "%s (%s)" % (hs.get("android_version", "?"), hs.get("android_build", "?")) if hs.get("android_version") else None),
                          ("Baseband", hs.get("baseband")), ("Modem build", modem.get("build_id") or modem.get("version_dir")),
                          ("SoC", hs.get("soc") or hs.get("platform")), ("SIM operator", "%s %s" % (hs.get("sim_operator_name", ""), hs.get("sim_mccmnc", "")) if hs.get("sim_mccmnc") else None),
-                         ("PLMNs seen", ", ".join(net.get("plmns", {}).keys()) or None), ("Transport", json.dumps(summary.get("transport"))),
+                         ("PLMNs seen", ", ".join(net.get("plmns", {}).keys()) or None), ("Transport", _transport_text(summary.get("transport"))),
                          ("Log profile", summary.get("log_profile")), ("Records / CRC errors", records_crc),
                          ("Cadence", cadence),
                          ("Stopped by", (meta.get("summary") or {}).get("stopped_by")), ("Note", summary.get("note"))):
@@ -681,7 +722,8 @@ def render_html(summary: dict, meta: dict, events: list, kpi_rows: list, track, 
     files = summary.get("files", {})
     files_html = ", ".join('<a href="%s">%s</a>' % (_esc(v), _esc(v)) for v in files.values())
 
-    return """<!doctype html><html><head><meta charset="utf-8"><title>%(title)s</title><style>%(css)s</style></head>
+    return """<!doctype html><html><head><meta charset="utf-8">\
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>%(title)s</title><style>%(css)s</style></head>
 <body><header><h1>%(title)s</h1><div class="sub">%(sub)s</div></header><main>
 <section><div class="tiles">%(tiles)s</div></section>
 <div class="grid2"><section><h2>Session</h2><div class="kv">%(kv)s</div><p class="muted" style="margin-top:8px">Files: %(files)s</p></section>
@@ -731,7 +773,8 @@ def build_index(root: str, log=lambda s: None) -> Optional[str]:
             _esc(_utc_text(s["started_utc"])), _esc(s["name"]), _esc(s["handset"]), _esc(s["plmns"]),
             _esc(_fmt_seconds(summ["duration_s"]) if summ.get("duration_s") is not None else "-"), s["messages"],
             "sev-error" if ev.get("errors") else "", _esc(ev.get("errors", "-")), _esc(_fmt(rsrp, 1, " dBm")), report_link))
-    page = """<!doctype html><html><head><meta charset="utf-8"><title>FieldTap sessions</title><style>%s</style></head>
+    page = """<!doctype html><html><head><meta charset="utf-8">\
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>FieldTap sessions</title><style>%s</style></head>
 <body><header><h1>FieldTap sessions</h1><div class="sub">%s</div></header><main><section>
 <table><tr><th>started (UTC)</th><th>name</th><th>handset</th><th>PLMN</th><th>duration</th><th>messages</th><th>errors</th><th>avg RSRP</th><th></th></tr>%s</table>
 </section></main><footer>Generated by FieldTap %s</footer></body></html>

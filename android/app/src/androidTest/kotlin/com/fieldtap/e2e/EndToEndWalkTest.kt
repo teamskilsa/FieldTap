@@ -86,14 +86,16 @@ class EndToEndWalkTest {
         allowPermissions()
         screens.awaitLiveRadio(expectLteNr)
         screens.shot("04-live-radio")
-        checkWalkMode()
+        checkScreenNotKeptOnBeforeRecording()
         saveTestSettings()
         val dirName = startSession()
         val recordingSinceMs = SystemClock.elapsedRealtime()
+        checkScreenKeptOnWhileRecording()
         addMarker(recordingSinceMs)
         markFromNotification()
         keepRecording(recordingSinceMs, walkMs, expectLteNr)
         stopSession(dirName, recordingSinceMs)
+        checkScreenReleasedAfterStop()
         exportAndShare(dirName)
     }
 
@@ -194,43 +196,66 @@ class EndToEndWalkTest {
         screens.back()
         screens.awaitText(R.string.settings_title)
         // Settings is a tab root now: leave it by the Live tab, not a Back arrow.
-        screens.openTab(R.string.nav_live)
+        screens.openTab(R.string.nav_signal)
         screens.awaitText(R.string.live_title)
     }
 
-    /**
-     * Walk mode keeps the screen on and leaves its brightness to the phone: a window brightness overrides adaptive
-     * brightness, and a fixed dim level is unreadable outdoors. Turned off again, the screen may sleep. It is an on-off
-     * icon in Live's top bar.
-     */
-    private fun checkWalkMode() {
-        val walkMode = isToggleable() and hasContentDescription(E2e.string(R.string.live_walk_mode))
-        if (screens.isOn(walkMode)) screens.click(walkMode)
-        screens.click(walkMode)
-        compose.onAllNodes(walkMode).onFirst().assertIsOn()
+    /** True while the activity holds FLAG_KEEP_SCREEN_ON. */
+    private fun keepsScreenOn(): Boolean {
         compose.waitForIdle()
-        var keepsScreenOn = false
+        var held = false
+        compose.runOnUiThread {
+            held = compose.activity.window.attributes.flags and
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+        }
+        return held
+    }
+
+    /** The window brightness, which must stay untouched. */
+    private fun windowBrightness(): Float {
+        compose.waitForIdle()
         var brightness = 0f
-        compose.runOnUiThread {
-            val attributes = compose.activity.window.attributes
-            keepsScreenOn = attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
-            brightness = attributes.screenBrightness
-        }
-        screens.shot("04b-walk-mode")
-        screens.click(walkMode)
-        compose.onAllNodes(walkMode).onFirst().assertIsOff()
-        compose.waitForIdle()
-        var stillKeptOn = true
-        compose.runOnUiThread {
-            stillKeptOn = compose.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
-        }
-        result["walk_mode_keeps_screen_on"] = keepsScreenOn
-        result["walk_mode_brightness_override"] = brightness != WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        result["walk_mode_clears_keep_screen_on"] = !stillKeptOn
+        compose.runOnUiThread { brightness = compose.activity.window.attributes.screenBrightness }
+        return brightness
+    }
+
+    /** Idle on Live, nothing is being recorded, so the screen is allowed to sleep. */
+    private fun checkScreenNotKeptOnBeforeRecording() {
+        val held = keepsScreenOn()
+        result["keep_screen_on_before_recording"] = held
         save()
-        assertTrue("Walk mode did not keep the screen on", keepsScreenOn)
-        assertEquals("Walk mode set the window brightness", WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f)
-        assertFalse("Turning walk mode off left the screen kept on", stillKeptOn)
+        assertFalse("The screen was kept on before a session started", held)
+    }
+
+    /**
+     * While a session records, the screen is kept on. This is not a preference: Android refreshes cell
+     * information every 2 s only while the display is on, and every 10 s once it sleeps, so a session
+     * whose screen slept would record a quarter of the samples it reported being able to take.
+     *
+     * The window brightness is left alone. A window brightness overrides adaptive brightness and the
+     * user's own slider, and a fixed dim level is unreadable outdoors, where drive tests happen.
+     */
+    private fun checkScreenKeptOnWhileRecording() {
+        val held = keepsScreenOn()
+        val brightness = windowBrightness()
+        result["keep_screen_on_while_recording"] = held
+        result["keep_screen_on_brightness_override"] =
+            brightness != WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        save()
+        screens.shot("04b-recording-keeps-screen-on")
+        assertTrue("A recording session did not keep the screen on", held)
+        assertEquals(
+            "Recording set the window brightness",
+            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE, brightness, 0f,
+        )
+    }
+
+    /** Once the session stops, the flag goes with it. */
+    private fun checkScreenReleasedAfterStop() {
+        val held = keepsScreenOn()
+        result["keep_screen_on_cleared_after_stop"] = !held
+        save()
+        assertFalse("Stopping the session left the screen kept on", held)
     }
 
     /** Starts the session from the Start dialog, through the pre-start sheet when it shows; returns its directory. */
@@ -393,7 +418,7 @@ class EndToEndWalkTest {
     }
 
     private fun exportAndShare(dirName: String) {
-        screens.openTab(R.string.nav_sessions)
+        screens.openTab(R.string.nav_logs)
         val row = hasText(SESSION_NAME) and hasClickAction()
         screens.await(row)
         screens.shot("12-sessions")

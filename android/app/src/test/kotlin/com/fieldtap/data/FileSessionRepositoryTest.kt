@@ -128,10 +128,17 @@ class FileSessionRepositoryTest {
 
         // The golden kpi.csv: 54 LTE values with median -89 dBm, none below -105 dBm, beside 46 NR leg values.
         val golden = SignalSummary(ServingRat.LTE, samples = 54, medianRsrpDbm = -89, belowFairPct = 0.0)
-        assertEquals(golden, sessions.getValue(GOLDEN_NAME).signal)
+        // The trace is the chart's own business and is asserted in SignalSummaryTest; here only the
+        // figures the list and the detail header show have to match.
+        fun figures(summary: SignalSummary?) = summary?.copy(trace = emptyList())
+        assertEquals(golden, figures(sessions.getValue(GOLDEN_NAME).signal))
         assertNull("the running session's kpi.csv is still growing", sessions.getValue(OPEN_ACTIVE).signal)
-        assertEquals(golden, runBlocking { repository.detail(GOLDEN_NAME) }?.summary?.signal)
-        assertEquals(golden, runBlocking { repository.detail(OPEN_ACTIVE) }?.summary?.signal)
+        assertEquals(golden, figures(runBlocking { repository.detail(GOLDEN_NAME) }?.summary?.signal))
+        assertEquals(golden, figures(runBlocking { repository.detail(OPEN_ACTIVE) }?.summary?.signal))
+        assertTrue(
+            "the golden session carries a chart",
+            (runBlocking { repository.detail(GOLDEN_NAME) }?.summary?.signal?.trace?.size ?: 0) == 54,
+        )
     }
 
     @Test

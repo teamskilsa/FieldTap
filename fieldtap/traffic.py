@@ -29,7 +29,7 @@ IPERF_REMOTE = "/data/local/tmp/iperf3"
 @dataclass
 class TestResult:
     when: datetime
-    test: str                      # ping | download | iperf3
+    test: str                      # ping | download | upload | iperf3
     target: str
     ok: bool
     metrics: dict = field(default_factory=dict)
@@ -45,9 +45,10 @@ class TestResult:
         if self.test == "ping":
             return "ping %s: %s%% loss, rtt avg %s ms (min %s / max %s)" % (
                 self.target, m.get("loss_pct", "?"), m.get("rtt_avg_ms", "?"), m.get("rtt_min_ms", "?"), m.get("rtt_max_ms", "?"))
-        if self.test == "download":
-            return "download: %.2f Mbit/s, %s bytes in %.1f s, http %s" % (
-                m.get("mbps", 0.0), m.get("bytes", "?"), m.get("seconds", self.seconds), m.get("http_code", "?"))
+        if self.test in ("download", "upload"):
+            return "%s: %.2f Mbit/s, %s bytes in %.1f s, http %s" % (
+                self.test, m.get("mbps", 0.0), m.get("bytes", "?"), m.get("seconds", self.seconds),
+                m.get("http_code", "?"))
         if self.test == "iperf3":
             return "iperf3 %s: %.2f Mbit/s" % (self.target, m.get("mbps", 0.0))
         return "%s: %s" % (self.test, "ok" if self.ok else "failed")
@@ -99,7 +100,7 @@ def summary(results: list) -> dict:
                        "rtt_avg_ms": round(sum(avg) / len(avg), 1) if avg else None,
                        "rtt_max_ms": max((r.metrics.get("rtt_max_ms", 0) for r in ok), default=None),
                        "loss_pct_avg": round(sum(loss) / len(loss), 1) if loss else None}
-    for name in ("download", "iperf3"):
+    for name in ("download", "upload", "iperf3"):
         runs = [r for r in results if r.test == name]
         if runs:
             ok = [r for r in runs if r.ok and "mbps" in r.metrics]

@@ -125,4 +125,64 @@ class NetTestSchedulerTest {
         assertEquals(10_000_000, defaults.downloadCapBytes)
         assertEquals(100_000_000, defaults.sessionBudgetBytes)
     }
+
+    @Test
+    fun noUploadWithoutUrl() {
+        // Upload is off unless asked for: it spends the user's data uplink.
+        val scheduler = NetTestScheduler(TestSettings(pingTarget = "", downloadUrl = null), 0)
+        assertNull(scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS + 10_000))
+        assertFalse(scheduler.hasWork)
+    }
+
+    @Test
+    fun theFirstUploadIsDueAfterTheFirstDownloadThenEveryInterval() {
+        val settings = TestSettings(
+            pingTarget = "",
+            downloadUrl = null,
+            uploadUrl = "https://example.test/__up",
+            uploadIntervalMs = 120_000,
+        )
+        val scheduler = NetTestScheduler(settings, 0)
+
+        assertNull(scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS - 1))
+        assertEquals(TrafficTest.UPLOAD, scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS))
+
+        scheduler.markStarted(TrafficTest.UPLOAD, NetTestScheduler.FIRST_UPLOAD_DELAY_MS)
+        assertNull(scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS + 119_999))
+        assertEquals(TrafficTest.UPLOAD, scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS + 120_000))
+    }
+
+    @Test
+    fun uploadAndDownloadSpendOneSharedBudget() {
+        val settings = TestSettings(
+            pingTarget = "",
+            downloadUrl = "https://example.test/__down",
+            downloadCapBytes = 10_000_000,
+            uploadUrl = "https://example.test/__up",
+            uploadCapBytes = 2_000_000,
+            sessionBudgetBytes = 11_000_000,
+        )
+        val scheduler = NetTestScheduler(settings, 0)
+        assertEquals(TrafficTest.DOWNLOAD, scheduler.nextDue(NetTestScheduler.FIRST_DOWNLOAD_DELAY_MS))
+
+        // One download leaves 1 MB, which is under the upload's 2 MB cap, so neither may run again.
+        scheduler.addBytes(10_000_000)
+        assertNull(scheduler.nextDue(NetTestScheduler.FIRST_UPLOAD_DELAY_MS + 600_000))
+        assertFalse(scheduler.hasWork)
+    }
+
+    @Test
+    fun anUploadAloneStillEndsTheBudget() {
+        val settings = TestSettings(
+            pingTarget = "",
+            downloadUrl = null,
+            uploadUrl = "https://example.test/__up",
+            uploadCapBytes = 2_000_000,
+            sessionBudgetBytes = 3_000_000,
+        )
+        val scheduler = NetTestScheduler(settings, 0)
+        assertTrue(scheduler.hasWork)
+        scheduler.addBytes(2_000_000)
+        assertFalse("1 MB left cannot hold another 2 MB upload", scheduler.hasWork)
+    }
 }

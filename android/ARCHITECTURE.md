@@ -22,9 +22,11 @@ These answer the open questions from the design pass. They override anything bel
 KDoc that disagrees.
 
 1. **Limits statement.** The app shows exactly: "Reads what Android exposes: cell identity,
-   RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests. It does not decode RRC,
-   NAS, SIB or any layer-3 signalling, cannot lock bands or cells, cannot scan operators, and needs
-   no root." There is no laptop or modem sentence, because there is no modem product yet.
+   RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests. That needs no root, and
+   it is all this app does until you turn on signalling capture. Signalling capture reads RRC and NAS
+   from the modem itself and needs a rooted phone; it is off unless you switch it on. Neither mode
+   can lock bands or cells or scan operators." It names both modes and says which one is the
+   default, because a statement that claimed only the quiet one would be false on a rooted phone.
 2. **Consent text.** Plain language: what is recorded (cell measurements, the GPS track during
    sessions you start, test results, the phone model), that it stays on this phone and leaves only
    when you share a zip, that no phone or SIM identifiers are ever read, and that consent can be

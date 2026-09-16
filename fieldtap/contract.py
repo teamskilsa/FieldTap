@@ -107,8 +107,8 @@ PLMN_LIST_PATTERN = r"^([0-9]{5,6}(, [0-9]{5,6})*)?$"
 TOKEN_PATTERN = r"^[a-z0-9_]+$"
 KPI_COMMENT_PATTERN = r"^android-api age_ms=(0|[1-9][0-9]*) src=(request|push)$"
 
-APP_TRAFFIC_TESTS = ["ping", "download"]
-LAPTOP_TRAFFIC_TESTS = ["ping", "download", "iperf3"]
+APP_TRAFFIC_TESTS = ["ping", "download", "upload"]
+LAPTOP_TRAFFIC_TESTS = ["ping", "download", "upload", "iperf3"]
 EVENT_SEVERITIES = ["info", "ok", "warn", "error"]
 LOCATION_PRECISIONS = ["full", "approx_110m", "none"]
 
@@ -1243,6 +1243,8 @@ def _traffic_row(row, ctx, file, line, out, state) -> None:
             out.warning(file, line, "a successful ping without rtt_avg_ms", "ping-rtt")
         if test == "download" and not row["mbps"]:
             out.warning(file, line, "a successful download without mbps", "download-mbps")
+        if test == "upload" and not row["mbps"]:
+            out.warning(file, line, "a successful upload without mbps", "upload-mbps")
     elif row["ok"] == "0" and not row["error"]:
         out.warning(file, line, "a failed test without an error text", "failed-no-error")
     rtts = [_number(row[k], False) for k in ("rtt_min_ms", "rtt_avg_ms", "rtt_max_ms") if row[k]]

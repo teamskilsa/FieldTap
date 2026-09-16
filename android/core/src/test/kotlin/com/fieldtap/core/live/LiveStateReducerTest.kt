@@ -64,6 +64,9 @@ class LiveStateReducerTest {
                 operator = "Verizon",
                 connectionStatus = CellSnapshot.CONNECTION_PRIMARY_SERVING,
                 timestampMs = BOOT0,
+                // The Signal tab reads the tracking area and cell identity, so they reach the live view.
+                tac = 18_704,
+                cellId = 21_640_193L,
             ),
             state.serving,
         )
@@ -317,4 +320,109 @@ class LiveStateReducerTest {
         observedWallMs = WALL0 + (elapsedMs - BOOT0),
         observedElapsedMs = elapsedMs,
     )
+
+    @Test
+    fun anLteSecondaryServingCarrierIsAnAggregatedLegNotANeighbour() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(
+                400,
+                listOf(
+                    lte(0, pci = 212),
+                    lte(0, pci = 300, status = CellSnapshot.CONNECTION_SECONDARY_SERVING, rsrp = -95, cellId = 2),
+                    lte(0, pci = 100, status = CellSnapshot.CONNECTION_NONE, rsrp = -110, cellId = 1),
+                ),
+            ),
+        )
+        assertEquals(212, state.serving?.pci)
+        assertEquals(
+            "a carrier the phone is aggregating is not a neighbour",
+            listOf(100),
+            state.neighbours.map { it.pci },
+        )
+        assertEquals(listOf(300), state.aggregatedLegs.map { it.pci })
+    }
+
+    @Test
+    fun anNrSecondaryCarrierOnStandaloneIsAnAggregatedLegNotANeighbour() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(
+                400,
+                listOf(
+                    nr(0, pci = 393, status = CellSnapshot.CONNECTION_PRIMARY_SERVING),
+                    nr(0, pci = 394, status = CellSnapshot.CONNECTION_SECONDARY_SERVING),
+                ),
+            ),
+        )
+        assertEquals(393, state.serving?.pci)
+        assertNull("standalone NR has no NSA leg", state.nsaLeg)
+        assertTrue(state.neighbours.isEmpty())
+        assertEquals(listOf(394), state.aggregatedLegs.map { it.pci })
+    }
+
+    @Test
+    fun theNsaLegIsNotRepeatedAmongTheAggregatedLegs() {
+        val state = LiveStateReducer().reduce(
+            LiveState(),
+            answer(400, listOf(lte(0, pci = 212), nr(0, pci = 393))),
+        )
+        assertEquals(393, state.nsaLeg?.pci)
+        assertTrue("the NSA leg is shown once, as the NSA leg", state.aggregatedLegs.isEmpty())
+        assertTrue(state.neighbours.isEmpty())
+    }
+
+    @Test
+    fun theServingCellHistoryStartsWithTheCellServingNow() {
+        val state = LiveStateReducer().reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        assertEquals(listOf(212), state.servingHistory.map { it.cell.pci })
+        val visit = state.servingHistory.single()
+        assertEquals("one sample is a zero dwell, not an unknown one", visit.sinceMs, visit.untilMs)
+    }
+
+    @Test
+    fun stayingOnOneCellExtendsItsVisitRatherThanAddingAnother() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 212))))
+        state = reducer.reduce(state, answer(4_400, listOf(lte(4_000, pci = 212))))
+        val visit = state.servingHistory.single()
+        assertEquals(212, visit.cell.pci)
+        assertEquals(4_000L, visit.untilMs - visit.sinceMs)
+    }
+
+    @Test
+    fun movingToAnotherCellOpensAVisitAndKeepsTheOldOne() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 213, cellId = 9))))
+        assertEquals("newest first", listOf(213, 212), state.servingHistory.map { it.cell.pci })
+    }
+
+    @Test
+    fun theHistoryIsCappedAndDropsTheOldest() {
+        val reducer = LiveStateReducer()
+        var state = LiveState()
+        for (i in 0 until LiveStateReducer.HISTORY_MAX + 5) {
+            state = reducer.reduce(
+                state,
+                answer(400 + i * 2_000L, listOf(lte(i * 2_000L, pci = 100 + i, cellId = i.toLong()))),
+            )
+        }
+        assertEquals(LiveStateReducer.HISTORY_MAX, state.servingHistory.size)
+        assertEquals("the newest is kept", 100 + LiveStateReducer.HISTORY_MAX + 4, state.servingHistory.first().cell.pci)
+    }
+
+    @Test
+    fun returningToAnEarlierCellIsANewVisit() {
+        val reducer = LiveStateReducer()
+        var state = reducer.reduce(LiveState(), answer(400, listOf(lte(0, pci = 212))))
+        state = reducer.reduce(state, answer(2_400, listOf(lte(2_000, pci = 213, cellId = 9))))
+        state = reducer.reduce(state, answer(4_400, listOf(lte(4_000, pci = 212))))
+        assertEquals(
+            "a return is a separate stay, not a merge with the first",
+            listOf(212, 213, 212),
+            state.servingHistory.map { it.cell.pci },
+        )
+    }
 }

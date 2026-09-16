@@ -101,23 +101,16 @@ class LiveViewModelTest {
     }
 
     @Test
-    fun adviceShowsTheSheetAndStartAnywayStarts() = runTest(main.dispatcher) {
+    fun adviceStartsTheSessionAndSaysSoRatherThanOpeningTheSheet() = runTest(main.dispatcher) {
         graph.readiness.report = TestData.readiness(ReadinessCheck.WIFI_OFF to ReadinessLevel.ADVICE)
         val viewModel = collected()
 
-        viewModel.start(StartRequest("Walk"))
+        viewModel.start(StartRequest("Session"))
         runCurrent()
 
-        val review = viewModel.state.value.prestart as PrestartState.Review
-        assertEquals(listOf(PrestartIssue(PrestartIssueKind.WIFI_ON_BATTERY, blocking = false, target = SettingsTarget.APP_DETAILS)), review.issues)
-        assertTrue(review.canStartAnyway)
-        assertTrue(graph.sessionControl.startRequests.isEmpty())
-
-        viewModel.startAnyway()
-        runCurrent()
-
-        assertEquals(listOf(StartRequest("Walk")), graph.sessionControl.startRequests)
-        assertEquals(PrestartState.None, viewModel.state.value.prestart)
+        assertEquals("advice is not a gate", PrestartState.None, viewModel.state.value.prestart)
+        assertEquals(listOf(StartRequest("Session")), graph.sessionControl.startRequests)
+        assertEquals(LiveMessage.STARTED_WITH_ADVICE, viewModel.state.value.message?.message)
     }
 
     @Test
@@ -155,15 +148,24 @@ class LiveViewModelTest {
         graph.settings.currentFailure = IOException("DataStore unreadable")
         val viewModel = collected()
 
-        viewModel.start(StartRequest("Walk"))
+        viewModel.start(StartRequest("Session"))
         runCurrent()
 
-        val review = viewModel.state.value.prestart as PrestartState.Review
-        assertEquals(listOf(PrestartIssue(PrestartIssueKind.CHECK_FAILED, blocking = false)), review.issues)
-
-        viewModel.startAnyway()
-        runCurrent()
+        // A check that could not run is advice, so it must not stop the session either.
+        assertEquals(PrestartState.None, viewModel.state.value.prestart)
         assertEquals(1, graph.sessionControl.startRequests.size)
+        assertEquals(LiveMessage.STARTED_WITH_ADVICE, viewModel.state.value.message?.message)
+    }
+
+    @Test
+    fun aCleanStartSaysNothingExtra() = runTest(main.dispatcher) {
+        val viewModel = collected()
+
+        viewModel.start(StartRequest("Session"))
+        runCurrent()
+
+        assertEquals(1, graph.sessionControl.startRequests.size)
+        assertEquals("nothing to advise, so no message", null, viewModel.state.value.message?.message)
     }
 
     @Test
@@ -350,18 +352,14 @@ class LiveViewModelTest {
     }
 
     @Test
-    fun walkModeFollowsTheSettingUntilToggled() = runTest(main.dispatcher) {
-        graph.settings.stored.value = TestData.settings(walkModeDefault = true, testsDefaultOn = true)
+    fun theTestsDefaultFollowsTheSetting() = runTest(main.dispatcher) {
+        graph.settings.stored.value = TestData.settings(testsDefaultOn = true)
         val viewModel = collected()
         runCurrent()
-        assertTrue(viewModel.state.value.walkMode)
         assertTrue(viewModel.state.value.testsDefaultOn)
 
-        viewModel.setWalkMode(false)
-        graph.settings.stored.value = TestData.settings(walkModeDefault = true, testsDefaultOn = false)
+        graph.settings.stored.value = TestData.settings(testsDefaultOn = false)
         runCurrent()
-
-        assertFalse(viewModel.state.value.walkMode)
         assertFalse(viewModel.state.value.testsDefaultOn)
     }
 
@@ -372,7 +370,6 @@ class LiveViewModelTest {
         graph.live.state.value = LiveState(nowElapsedMs = 42)
         runCurrent()
 
-        assertFalse(viewModel.state.value.walkMode)
         assertFalse(viewModel.state.value.testsDefaultOn)
         assertEquals(42L, viewModel.state.value.live.nowElapsedMs)
     }

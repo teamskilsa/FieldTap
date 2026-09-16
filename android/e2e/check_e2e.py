@@ -70,11 +70,11 @@ HEARTBEAT_SLACK_MS = 7_000
 
 # Screens taken at every scroll position: NAME-p1.png, NAME-p2.png and so on (Screens.shotFull).
 FIRST_RUN_PAGED = ("01-disclosure", "01b-disclosure-notice", "02-permissions")
-TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-probe", "07c-probe-root-check",
+TOUR_PAGED = ("03-live", "04-sessions", "05-session-detail", "06-readiness", "07-traffic", "07-probe", "07c-probe-root-check",
               "08-settings", "08b-test-targets", "09-about")
 # Taken once: the Start dialog, and the bottom navigation bar with Live selected (10-nav-live) and with another tab
-# selected (10b-nav-diagnostics) — the tab-navigation evidence, in every variant.
-TOUR_SINGLE = ("03b-start-dialog", "10-nav-live", "10b-nav-diagnostics")
+# selected (10b-nav-traffic) — the tab-navigation evidence, in every variant.
+TOUR_SINGLE = ("03b-start-dialog", "10-nav-live", "10b-nav-traffic")
 # Upright variants also turn the phone for Live; the landscape variant takes every screen turned.
 LIVE_TURNED = "03e-live-landscape"
 WALK_SCREENS = (
@@ -497,11 +497,14 @@ def check_walk(out: Path, repo: Path, walk_seconds: int, expect_lte_nr: bool, r:
         r.check("events.csv: the 5G icon the session started with (nr_display)", icon and icon[0][1] == "5G icon on", icon[:3])
     elif shown is False:
         r.check("events.csv: no 5G icon event while the phone shows none", not icon or icon[0][1] == "5G icon on", icon[:3])
-    r.check("walk mode: keeps the screen on, leaves brightness to the phone, and clears the flag when turned off",
-            result.get("walk_mode_keeps_screen_on") is True and result.get("walk_mode_brightness_override") is False
-            and result.get("walk_mode_clears_keep_screen_on") is True,
-            "keep screen on %s, brightness override %s, cleared %s" % (result.get("walk_mode_keeps_screen_on"),
-            result.get("walk_mode_brightness_override"), result.get("walk_mode_clears_keep_screen_on")))
+    r.check("screen: kept on only while recording, brightness left to the phone, flag cleared at Stop",
+            result.get("keep_screen_on_before_recording") is False
+            and result.get("keep_screen_on_while_recording") is True
+            and result.get("keep_screen_on_brightness_override") is False
+            and result.get("keep_screen_on_cleared_after_stop") is True,
+            "before %s, while recording %s, brightness override %s, cleared %s"
+            % (result.get("keep_screen_on_before_recording"), result.get("keep_screen_on_while_recording"),
+               result.get("keep_screen_on_brightness_override"), result.get("keep_screen_on_cleared_after_stop")))
     r.check("walk: the recording Stop and Mark controls sit wholly above the bottom navigation bar",
             result.get("recording_controls_clear") is True,
             "clear %s, gap %s px" % (result.get("recording_controls_clear"), result.get("recording_controls_gap_px")))

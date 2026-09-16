@@ -15,6 +15,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TrafficRecordsTest {
+    private val UPLOAD_URL = "https://speed.cloudflare.com/__up"
     private val delta = 1e-9
 
     /** 2026-09-10T14:30:00.000Z, the golden session's start. */
@@ -216,5 +217,69 @@ class TrafficRecordsTest {
     private companion object {
         const val URL = "https://speed.cloudflare.com/__down?bytes=10000000"
         const val GOLDEN_DIR = "../../tests/fixtures/android_session/20260910-143000_Mall-walk-north-path"
+    }
+
+    @Test
+    fun aCompletedUploadReportsMbpsFromTheBytesItSent() {
+        val record = TrafficRecords.upload(sessionStart, UPLOAD_URL, UploadOutcome.Completed(2_000_000, 4.0, 200))
+
+        with(record.row) {
+            assertTrue(ok)
+            assertEquals(TrafficTest.UPLOAD, test)
+            assertEquals(UPLOAD_URL, target)
+            assertEquals(2_000_000L, bytes)
+            assertEquals(200, httpCode)
+            // 2 000 000 bytes * 8 / 4 s / 1e6
+            assertEquals(4.0, mbps!!, delta)
+        }
+        assertNull(record.failure)
+    }
+
+    @Test
+    fun aPostAnsweredWithAnyTwoHundredCountsAsAccepted() {
+        // A server may answer a POST with 204 and no body; that is a delivered upload, not a failure.
+        for (code in listOf(200, 201, 202, 204)) {
+            val record = TrafficRecords.upload(sessionStart, UPLOAD_URL, UploadOutcome.Completed(1_000, 1.0, code))
+            assertTrue("http $code", record.row.ok)
+            assertEquals(code, record.row.httpCode)
+        }
+    }
+
+    @Test
+    fun aPostAnsweredWithAnythingElseIsAnHttpFailure() {
+        val record = TrafficRecords.upload(sessionStart, UPLOAD_URL, UploadOutcome.Completed(1_000, 1.0, 413))
+
+        assertFalse(record.row.ok)
+        assertEquals("http status not 200: 413", record.row.error)
+        assertEquals(413, record.row.httpCode)
+        assertNull(record.row.mbps)
+        assertNotNull(record.failure)
+    }
+
+    @Test
+    fun anUploadTheServerTookWithoutBytesIsAFailureNotAZeroRate() {
+        val record = TrafficRecords.upload(sessionStart, UPLOAD_URL, UploadOutcome.Completed(0, 1.0, 200))
+
+        assertFalse(record.row.ok)
+        assertEquals("network error: nothing sent", record.row.error)
+        assertEquals(0L, record.row.bytes)
+        assertNull("no rate is claimed for nothing", record.row.mbps)
+    }
+
+    @Test
+    fun aFailedUploadKeepsTheBytesItManagedToSend() {
+        val record = TrafficRecords.upload(
+            sessionStart, UPLOAD_URL, UploadOutcome.Failed(NetFailure.TIMEOUT, null, 60.0, null, 512_000),
+        )
+
+        with(record.row) {
+            assertFalse(ok)
+            assertEquals("timeout", error)
+            assertEquals(512_000L, bytes)
+            assertNull(httpCode)
+            assertNull(mbps)
+        }
+        assertNotNull(record.failure)
+        assertEquals(EventKind.TEST_FAILED, record.failure!!.kind)
     }
 }

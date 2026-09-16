@@ -5,6 +5,7 @@ import com.fieldtap.core.export.ExportException
 import com.fieldtap.core.session.StartRequest
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
+import com.fieldtap.data.CaptureStore
 import com.fieldtap.format.GapMeta
 import com.fieldtap.format.LocationPrecision
 import com.fieldtap.ui.common.FakeAppGraph
@@ -19,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -26,13 +28,17 @@ class SessionsViewModelTest {
     @get:Rule
     val main = MainDispatcherRule()
 
+    /** An empty capture store: these tests are about drives, and a phone without root has no captures. */
+    @get:Rule
+    val captureRoot = TemporaryFolder()
+
     private val graph = FakeAppGraph()
 
     @Test
     fun itStartsLoadingAndRefreshReadsSessionsAndStorage() = runTest(main.dispatcher) {
         val sessions = listOf(TestData.summary("20260910-150000_B"), TestData.summary("20260910-143000_A"))
         graph.sessions.summaries = sessions
-        val viewModel = SessionsViewModel(graph)
+        val viewModel = SessionsViewModel(graph, CaptureStore(captureRoot.root), main.dispatcher)
         assertTrue(viewModel.state.value.loading)
         assertEquals(0, graph.sessions.listCalls)
 
@@ -45,7 +51,7 @@ class SessionsViewModelTest {
     @Test
     fun aFailedRefreshKeepsTheLastListAndSaysSo() = runTest(main.dispatcher) {
         graph.sessions.summaries = listOf(TestData.summary())
-        val viewModel = SessionsViewModel(graph)
+        val viewModel = SessionsViewModel(graph, CaptureStore(captureRoot.root), main.dispatcher)
         viewModel.refresh()
         runCurrent()
 
@@ -63,7 +69,7 @@ class SessionsViewModelTest {
     fun anUnmeasurableStorageStillShowsTheSessions() = runTest(main.dispatcher) {
         graph.sessions.summaries = listOf(TestData.summary())
         graph.sessions.storageFailure = IOException("statfs failed")
-        val viewModel = SessionsViewModel(graph)
+        val viewModel = SessionsViewModel(graph, CaptureStore(captureRoot.root), main.dispatcher)
 
         viewModel.refresh()
         runCurrent()
@@ -75,7 +81,7 @@ class SessionsViewModelTest {
 
     @Test
     fun aSessionStartingOrEndingRefreshesTheList() = runTest(main.dispatcher) {
-        val viewModel = SessionsViewModel(graph)
+        val viewModel = SessionsViewModel(graph, CaptureStore(captureRoot.root), main.dispatcher)
         runCurrent()
         assertEquals(0, graph.sessions.listCalls)
 

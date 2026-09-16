@@ -118,3 +118,60 @@ def test_verno_and_build_id_parsers():
     info = protocol.parse_ext_build_id_response(build, info)
     assert info.build_id == "MPSS.HI.4.3.5-00123" and info.model_string == "SM8550"
     assert info.msm_revision == 0x1234
+
+
+def _multi_log(packets, count=None, version=1):
+    body = b"".join(packets)
+    n = len(packets) if count is None else count
+    return protocol.MULTI_LOG_HEADER.pack(protocol.DIAG_MULTI_LOG_F, version, 0, n) + body
+
+
+def test_qmdl2_container_yields_the_single_packet_diag_mdlog_writes():
+    packet = protocol.build_log_packet(0xB0C0, 0x1234, b"\x01\x02\x03\x04")
+    got = list(protocol.iter_qmdl2_log_packets(_multi_log([packet])))
+    assert got == [packet]
+    rec = protocol.parse_log_packet(got[0])
+    assert rec.code == 0xB0C0 and rec.body == b"\x01\x02\x03\x04"
+
+
+def test_qmdl2_container_yields_every_packet_when_it_holds_several():
+    packets = [
+        protocol.build_log_packet(0xB0C0, 1, b"a" * 10),
+        protocol.build_log_packet(0xB821, 2, b"b" * 3),
+        protocol.build_log_packet(0xB0EC, 3, b""),
+    ]
+    got = list(protocol.iter_qmdl2_log_packets(_multi_log(packets)))
+    assert got == packets
+    assert [protocol.parse_log_packet(p).code for p in got] == [0xB0C0, 0xB821, 0xB0EC]
+
+
+def test_qmdl2_container_stops_at_the_count_it_declares():
+    packets = [protocol.build_log_packet(0xB0C0, 1, b"x" * 4),
+               protocol.build_log_packet(0xB821, 2, b"y" * 4)]
+    got = list(protocol.iter_qmdl2_log_packets(_multi_log(packets, count=1)))
+    assert got == packets[:1]
+
+
+def test_a_truncated_qmdl2_container_yields_what_it_holds():
+    packet = protocol.build_log_packet(0xB0C0, 1, b"z" * 20)
+    frame = _multi_log([packet])[:-5]
+    got = list(protocol.iter_qmdl2_log_packets(frame))
+    assert len(got) == 1 and len(got[0]) < len(packet)
+
+
+def test_a_frame_that_is_not_a_qmdl2_container_yields_nothing():
+    packet = protocol.build_log_packet(0xB0C0, 1, b"q")
+    assert list(protocol.iter_qmdl2_log_packets(packet)) == []
+    assert list(protocol.iter_qmdl2_log_packets(b"")) == []
+    assert list(protocol.iter_qmdl2_log_packets(b"\x98\x01")) == []
+
+
+def test_the_client_unwraps_a_qmdl2_container_into_records():
+    from fieldtap.diag.client import DiagClient
+    from fieldtap.diag.transport import Transport
+
+    client = DiagClient(Transport())
+    packet = protocol.build_log_packet(0xB0C0, 7, b"\xaa\xbb")
+    assert client._absorb_async(_multi_log([packet])) is True
+    assert client.stats["logs"] == 1
+    assert client._pending[0].code == 0xB0C0

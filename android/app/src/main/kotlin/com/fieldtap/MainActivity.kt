@@ -21,7 +21,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val graph = appGraph
         setContent {
-            FieldTapTheme {
+            // Always the instrument panel, whatever the phone is set to: the values are the product,
+            // and they read best as the brightest thing on a dark ground.
+            FieldTapTheme(darkTheme = true) {
                 FieldTapNavHost(graph = graph)
             }
         }

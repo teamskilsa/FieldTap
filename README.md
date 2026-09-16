@@ -6,13 +6,19 @@ Qualcomm diag port, decode it, and land it in Wireshark as clean GSMTAP.
 FieldTap is the real-network counterpart to the Simnovus simulator line. UESIM, ORUSIM
 and RuSIM simulate a UE in the lab. FieldTap taps a real one in the field.
 
-> **Status: pre-alpha. A clean-room implementation exists; it has not yet been run
-> against a handset.**
+> **Status: pre-alpha. First capture and decode off a real handset on 2026-09-14.**
 > The `fieldtap` package speaks diag itself and imports nothing from QCSuper or SCAT.
 > It decodes LTE and NR RRC/NAS log records and writes pcapng that stock Wireshark
-> dissects. The unit tests and `fieldtap selftest` pass against Wireshark 4.0, but the
-> header layout tables are verified only against a synthetic corpus. Read
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
+> dissects. On a rooted OnePlus 10 Pro (SM8450) it took 4,416 log records in 40 s
+> with no CRC errors, and Wireshark read the LTE RRC out of them as SIB1, SIB2-5,
+> SIB24 and Paging. That run also found the first real layout bug: packet version 27
+> of `0xB0C0` has a header three bytes longer than the synthetic corpus taught us
+> ([`docs/DEVICE-SETUP.md`](docs/DEVICE-SETUP.md)).
+>
+> One handset, idle, no SIM: everything seen so far is broadcast and paging. No
+> registration, no handover and no call flow has been decoded off the air yet, and
+> the remaining header layout tables are still verified only against the synthetic
+> corpus. Read [`docs/ROADMAP.md`](docs/ROADMAP.md) for what has to happen next, and
 > [`docs/LICENSING.md`](docs/LICENSING.md) for the decision that still gates the
 > business model.
 

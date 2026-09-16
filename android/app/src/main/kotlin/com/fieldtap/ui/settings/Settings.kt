@@ -198,10 +198,6 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         save(success = null) { settings -> settings.copy(testsDefaultOn = on) }
     }
 
-    fun setWalkModeDefault(on: Boolean) {
-        save(success = null) { settings -> settings.copy(walkModeDefault = on) }
-    }
-
     /** Adds or replaces by id, after validation. */
     fun saveZone(zone: PrivacyZone) {
         val problems = PrivacyZones.validate(zone)
@@ -274,7 +270,7 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
 
 /**
  * Settings, in the order they are changed: Measurement ("Instant cell updates", the only place the Phone permission is
- * asked for, android/ARCHITECTURE.md decision 9, and walk mode's default); privacy zones (label, radius, "here" from the
+ * asked for, android/ARCHITECTURE.md decision 9); privacy zones (label, radius, "here" from the
  * current fix, or typed coordinates), with a note that zones apply to new sessions and nothing is written inside them,
  * and no map tiles; the ping and download tests, as their default and a row that opens [TestTargetsScreen] with the
  * targets summarised; then withdrawing consent (decision 2). A zone's name never leaves this screen.
@@ -289,6 +285,7 @@ fun SettingsScreen(
     onOpenTestTargets: () -> Unit,
     onOpenReadiness: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -353,8 +350,8 @@ fun SettingsScreen(
         onOpenTestTargets = onOpenTestTargets,
         onOpenReadiness = onOpenReadiness,
         onOpenAbout = onOpenAbout,
+        onOpenProbe = onOpenProbe,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
-        onWalkModeDefaultChange = viewModel::setWalkModeDefault,
         onInstantUpdatesChange = { turnOn ->
             if (turnOn) {
                 when (phoneUi.action) {
@@ -472,8 +469,8 @@ internal fun SettingsContent(
     onOpenTestTargets: () -> Unit,
     onOpenReadiness: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
-    onWalkModeDefaultChange: (Boolean) -> Unit,
     onInstantUpdatesChange: (Boolean) -> Unit,
     onAddZoneHere: () -> Unit,
     onAddZoneByCoordinates: () -> Unit,
@@ -506,15 +503,13 @@ internal fun SettingsContent(
                 }
             }
         } else {
-            // What changes how a walk is measured comes first. The ping and download form took the first screen and a half,
+            // What changes how a session is measured comes first. The ping and download form took the first screen and a half,
             // though it rarely changes: it is one row now, opening a screen of its own.
             item(key = "measurement") {
                 MeasurementCard(
-                    walkModeDefault = settings.walkModeDefault,
                     phone = phone,
                     preciseLocation = preciseLocation,
                     onInstantUpdatesChange = onInstantUpdatesChange,
-                    onWalkModeDefaultChange = onWalkModeDefaultChange,
                     modifier = Modifier.setupContentWidth(),
                 )
             }
@@ -541,7 +536,12 @@ internal fun SettingsContent(
                 ConsentCard(consent = settings.consent, onWithdraw = onWithdrawConsent, modifier = Modifier.setupContentWidth())
             }
             item(key = "help") {
-                HelpCard(onOpenReadiness = onOpenReadiness, onOpenAbout = onOpenAbout, modifier = Modifier.setupContentWidth())
+                HelpCard(
+                    onOpenReadiness = onOpenReadiness,
+                    onOpenAbout = onOpenAbout,
+                    onOpenProbe = onOpenProbe,
+                    modifier = Modifier.setupContentWidth(),
+                )
             }
         }
     }
@@ -549,8 +549,21 @@ internal fun SettingsContent(
 
 /** The Readiness check and About, each a row opening a screen of its own. About and Readiness were reached from Live's overflow before the tabs. */
 @Composable
-private fun HelpCard(onOpenReadiness: () -> Unit, onOpenAbout: () -> Unit, modifier: Modifier) {
+private fun HelpCard(
+    onOpenReadiness: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenProbe: () -> Unit,
+    modifier: Modifier,
+) {
     SectionCard(title = stringResource(R.string.settings_section_help), icon = FieldTapIcons.Info, modifier = modifier) {
+        // The capability probe was a tab of its own, which put a once-per-phone task beside the two
+        // screens used every day. It belongs with the other setup tasks.
+        NavigationRow(
+            title = stringResource(R.string.settings_probe),
+            onClick = onOpenProbe,
+            supportingText = stringResource(R.string.settings_probe_supporting),
+            icon = FieldTapIcons.Pulse,
+        )
         NavigationRow(
             title = stringResource(R.string.settings_readiness),
             onClick = onOpenReadiness,
@@ -602,11 +615,9 @@ private fun TestsCard(
 
 @Composable
 private fun MeasurementCard(
-    walkModeDefault: Boolean,
     phone: PermissionUi,
     preciseLocation: Boolean,
     onInstantUpdatesChange: (Boolean) -> Unit,
-    onWalkModeDefaultChange: (Boolean) -> Unit,
     modifier: Modifier,
 ) {
     val granted = phone.status == PermissionStatus.GRANTED
@@ -627,13 +638,6 @@ private fun MeasurementCard(
             onCheckedChange = onInstantUpdatesChange,
             supportingText = instantSupporting,
             icon = FieldTapIcons.Phone,
-        )
-        ToggleRow(
-            title = stringResource(R.string.settings_walk_mode),
-            checked = walkModeDefault,
-            onCheckedChange = onWalkModeDefaultChange,
-            supportingText = stringResource(R.string.settings_walk_mode_supporting),
-            icon = FieldTapIcons.Walk,
         )
     }
 }
@@ -953,8 +957,8 @@ private fun SettingsPreview() {
             onOpenTestTargets = {},
             onOpenReadiness = {},
             onOpenAbout = {},
+            onOpenProbe = {},
             onTestsDefaultOnChange = {},
-            onWalkModeDefaultChange = {},
             onInstantUpdatesChange = {},
             onAddZoneHere = {},
             onAddZoneByCoordinates = {},

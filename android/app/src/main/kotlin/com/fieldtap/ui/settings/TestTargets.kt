@@ -261,6 +261,33 @@ private fun TestsForm(
             suffix = megabytesUnit,
             keyboardType = KeyboardType.Number,
         )
+        SectionDivider()
+        SetupSubheading(text = stringResource(R.string.settings_upload_heading))
+        TestField(
+            value = form.uploadUrl,
+            onValueChange = { onFormChange(form.copy(uploadUrl = it)) },
+            label = stringResource(R.string.settings_upload_url),
+            problem = problemText(problems, TestSettingsField.UPLOAD_URL, capMb),
+            supportingText = stringResource(R.string.settings_upload_url_supporting),
+            keyboardType = KeyboardType.Uri,
+        )
+        TestField(
+            value = form.uploadIntervalMin,
+            onValueChange = { onFormChange(form.copy(uploadIntervalMin = it)) },
+            label = stringResource(R.string.settings_upload_interval),
+            problem = problemText(problems, TestSettingsField.UPLOAD_INTERVAL, capMb),
+            suffix = minutesUnit,
+            keyboardType = KeyboardType.Number,
+        )
+        TestField(
+            value = form.uploadCapMb,
+            onValueChange = { onFormChange(form.copy(uploadCapMb = it)) },
+            label = stringResource(R.string.settings_upload_cap),
+            problem = problemText(problems, TestSettingsField.UPLOAD_CAP, capMb),
+            suffix = megabytesUnit,
+            keyboardType = KeyboardType.Number,
+        )
+        SectionDivider()
         TestField(
             value = form.sessionBudgetMb,
             onValueChange = { onFormChange(form.copy(sessionBudgetMb = it)) },
@@ -383,7 +410,7 @@ internal fun testTargetsSummary(tests: TestSettings): String {
     return ping + stringResource(R.string.value_separator) + download
 }
 
-private const val FORM_SAVED_FIELDS = 7
+private const val FORM_SAVED_FIELDS = 10
 
 /** Keeps typed test settings across a rotation; nothing typed (null) saves as an empty list. */
 private val TestSettingsFormSaver: Saver<TestSettingsForm?, Any> = listSaver<TestSettingsForm?, String>(
@@ -398,6 +425,9 @@ private val TestSettingsFormSaver: Saver<TestSettingsForm?, Any> = listSaver<Tes
                 form.downloadUrl,
                 form.downloadIntervalMin,
                 form.downloadCapMb,
+                form.uploadUrl,
+                form.uploadIntervalMin,
+                form.uploadCapMb,
                 form.sessionBudgetMb,
             )
         }
@@ -406,7 +436,10 @@ private val TestSettingsFormSaver: Saver<TestSettingsForm?, Any> = listSaver<Tes
         if (values.size != FORM_SAVED_FIELDS) {
             null
         } else {
-            TestSettingsForm(values[0], values[1], values[2], values[3], values[4], values[5], values[6])
+            TestSettingsForm(
+                values[0], values[1], values[2], values[3], values[4],
+                values[5], values[6], values[7], values[8], values[9],
+            )
         }
     },
 )

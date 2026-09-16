@@ -18,6 +18,7 @@ import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
 import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.radio.NetworkTypeNames
+import com.fieldtap.core.radio.PciPlanning
 import com.fieldtap.core.radio.ServingCellSelector
 import com.fieldtap.format.Rat
 import com.fieldtap.ui.components.ChartMath
@@ -130,7 +131,36 @@ data class RecordingStrip(val state: RecordingState, val freshSamples: Long, val
  *
  * Owner: workstream `ui-session`.
  */
+/**
+ * A neighbour as Live draws it: the cell, which of [com.fieldtap.core.radio.PciPlanning.MODULI] it
+ * reuses with the serving cell, and how far below the serving cell it is.
+ */
+data class NeighbourRow(val cell: LiveCell, val pciReuse: Set<Int>, val marginDb: Int?)
+
 object LivePresentation {
+
+    /**
+     * [LiveState.neighbours] paired with their PCI reuse against the serving cell, in the order Live
+     * draws them. A reuse is only reported for a neighbour on the serving cell's own RAT and carrier;
+     * see [com.fieldtap.core.radio.PciPlanning].
+     */
+    fun neighbourRows(state: LiveState): List<NeighbourRow> {
+        val serving = state.serving
+        return state.neighbours.map { cell ->
+            NeighbourRow(
+                cell = cell,
+                pciReuse = PciPlanning.collisions(
+                    servingRat = serving?.rat,
+                    servingPci = serving?.pci,
+                    servingArfcn = serving?.arfcn,
+                    neighbourRat = cell.rat,
+                    neighbourPci = cell.pci,
+                    neighbourArfcn = cell.arfcn,
+                ),
+                marginDb = PciPlanning.marginDb(serving?.rsrp, cell.rsrp),
+            )
+        }
+    }
     /** A fix older than this is "GPS lost", as `GpsEventDeriver` reports it in a session. */
     const val GPS_LOST_AFTER_MS: Long = 5_000
 
@@ -151,8 +181,14 @@ object LivePresentation {
     }
 
     /** Walk mode prompts to turn Wi-Fi off or plug in exactly when Wi-Fi forces the 10 s interval. */
-    fun showWalkModeWifiPrompt(walkMode: Boolean, conditions: DeviceConditions?): Boolean =
-        walkMode && conditions != null && conditions.wifiConnected && !conditions.charging
+    /**
+     * Whether to warn that Wi-Fi is costing samples. Android refreshes cell information every 2 s
+     * only while the display is on and the phone is either off Wi-Fi or charging; on Wi-Fi and on
+     * battery it refreshes every 10 s. Shown only while recording, because that is the only time
+     * the cadence changes what lands in the files.
+     */
+    fun showWifiCadencePrompt(recording: Boolean, conditions: DeviceConditions?): Boolean =
+        recording && conditions != null && conditions.wifiConnected && !conditions.charging
 
     /** Emergency-only comes from service state only, as in a session; roaming counts as in service. */
     fun serviceChip(service: ServiceStateSnapshot?): ServiceChip = when {

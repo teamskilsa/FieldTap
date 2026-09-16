@@ -120,7 +120,7 @@ One row so far, and it is honest about what is confirmed.
 
 | Handset | SoC | Android | Root | Detected on | Diag capture |
 | --- | --- | --- | --- | --- | --- |
-| OnePlus 10 Pro (NE2215, OP516FL1) | SM8450 Snapdragon 8 Gen 1, platform `taro` | 15 | Yes, unlocked + Magisk | macOS: yes. Windows: **never enumerated at all** | **No. OnePlus ships no diag driver** |
+| OnePlus 10 Pro (NE2215, OP516FL1) | SM8450 Snapdragon 8 Gen 1, platform `taro` | 15 (`15.0.0.901(EX01)`) | Unlocked; root needed, Magisk booted temporarily | macOS: yes. Windows: **never enumerated at all** | **Yes, with root**, over USB. 2026-09-14 |
 | Samsung Galaxy S22/S23/S24, **Snapdragon SKUs only** | Snapdragon | - | **Not required** | - | Reported yes, via `*#0808#`. Untested by us |
 | Xiaomi / Redmi / POCO, Snapdragon | Snapdragon | - | Required | - | Reported yes. Untested by us |
 
@@ -129,29 +129,53 @@ macOS enumerates immediately produced no USB event whatsoever on a Windows 11
 laptop that had never enumerated any handset. Try a Mac before spending time
 on Windows drivers.
 
-### The OnePlus finding, and why it matters
+### The OnePlus finding, corrected on the handset (2026-09-14)
 
-**OnePlus does not ship the diag driver at all.** This is not a setting, a
-permission or a missing root. OnePlus publishes its kernel source to meet the
-GPL, and across every branch released for the 10 Pro from OxygenOS 12.1 to 15
-there is no `drivers/char/diag`, no `diagchar`, and no `CONFIG_DIAG_CHAR` in any
-defconfig. The code was never compiled in.
+**This section said diag capture was impossible on this phone. It is not.** The
+kernel half of the old finding still holds: there is no `/dev/diag` on the
+device, `diagchar` is in no OxygenOS branch for the 10 Pro, and no amount of
+root creates it. What the earlier analysis missed is that on this platform
+**diag no longer goes through `diagchar` at all.**
 
-That also settles a question worth knowing generally: `/dev/diag` and the diag
-USB interface are **not** independent paths. Both are front ends onto the same
-`diagchar` driver, so with it absent, changing the USB composition has no
-backend to attach to and cannot restore diag either. The same pattern shows
-across OnePlus 8 Pro through 12, three chipset generations, which makes it a
-vendor policy rather than a quirk of this model.
+Qualcomm moved diag into userspace for `taro` and later. `/vendor/bin/diag-router`
+runs as the `system` user from boot (`vendor.qti.diag.rc`), and reaches the modem
+over QRTR rather than a character device. The USB side is FunctionFS: init mounts
+`/dev/ffs-diag`, `-diag-1` and `-diag-2`, `diag-router` holds `ep0`, `ep1` and
+`ep2` open on them, and `vendor.usb.diag.func.name` is `ffs`. So the diag backend
+is present and running on a stock phone; nothing is missing but a USB composition
+that exposes it.
 
-**Consequence for the product:** do not buy OnePlus for diag capture. The
-Samsung Snapdragon route is more interesting than it first looks, because it is
-reported to need **no root and no bootloader unlock**, just a dialer code. If
-that holds, it removes the single biggest objection to this class of tool: a
-rooted handset is hard to justify to an operator's security team, and a stock
-one is not. Worth buying one to confirm before committing the roadmap.
+**What actually works, confirmed on the handset:**
 
-Sources and the full analysis: [`research/oneplus-10-pro-diag.md`](research/oneplus-10-pro-diag.md).
+1. Root. The bootloader is already unlocked; a Magisk-patched `boot.img` started
+   once with `fastboot boot` is enough and writes nothing.
+2. `su -c 'setprop sys.usb.config diag,adb'`. Shell alone cannot: Android refuses
+   the property to an unprivileged caller. The gadget then carries `ffs.diag`
+   plus `ffs.adb` as `22d9:276c`, and the Mac sees interface 0 as class
+   `ff/ff/30` with two endpoints -- the Qualcomm diag signature.
+3. `fieldtap capture --usb --vid 0x22d9 --pid 0x276c --interface 0`: 4,416 log
+   records in 40 s with 0 CRC errors. QCSuper `--usb-modem` reads the same port
+   and returns the modem build (`MPSS.DE.2.0-00906-WAIPIO_GEN_PACK-1.15816.289`).
+
+**QCSuper's `--adb` mode still cannot work here,** and would fail even with root:
+it reads `/dev/diag`, which genuinely does not exist. Only the USB path works.
+
+**The phone can also log to its own storage.** `/vendor/bin/diag_mdlog -f MASK -o
+DIR` talks to `diag-router` through libdiag and writes qmdl with no computer
+attached. A mask file is a sequence of HDLC-framed log-config commands, which
+`fieldtap` can already build. Note the output is qmdl2 with QSR4-compressed F3
+messages; the RRC/NAS log packets inside it are ordinary and decode after their
+8-byte envelope is stripped.
+
+**Consequence for the product:** the OnePlus 10 Pro is usable for diag capture,
+at the cost of root. That cost is the real objection, not the chipset -- a rooted
+handset is hard to justify to an operator's security team. The Samsung Snapdragon
+route is still the more interesting one precisely because it is reported to need
+**no root and no bootloader unlock**, just a dialer code, and is still worth
+buying one to confirm.
+
+The earlier analysis is kept at [`research/oneplus-10-pro-diag.md`](research/oneplus-10-pro-diag.md);
+read it with this correction in hand, because its conclusion is wrong.
 
 ## 5. Recording what worked
 

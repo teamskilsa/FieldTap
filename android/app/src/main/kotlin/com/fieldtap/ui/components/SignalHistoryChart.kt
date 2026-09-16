@@ -104,6 +104,12 @@ fun SignalHistoryChart(
     sinrRange: IntRange = SignalScale.SINR_DISPLAY_RANGE,
     rsrpPanelHeight: Dp = Sizes.ChartPanelHeight,
     sinrPanelHeight: Dp = Sizes.ChartPanelHeight,
+    /**
+     * False draws RSRP alone, with no SINR panel and no "not reported" line in its place. The Signal
+     * tab does not show SINR at all; a line saying it was not reported would be answering a question
+     * that screen no longer asks.
+     */
+    showSinr: Boolean = true,
 ) {
     val colors = FieldTapDesign.colors
     Column(
@@ -134,7 +140,9 @@ fun SignalHistoryChart(
             areaFill = true,
         )
         Spacer(modifier = Modifier.height(Spacing.Xs))
-        if (sinrReported) {
+        if (!showSinr) {
+            // RSRP alone.
+        } else if (sinrReported) {
             ChartPanelHeader(labels.sinrTitle, labels.sinrUnit, ChartMath.stats(sinr, nowElapsedMs, windowMs), colors.chartSinr)
             TimeSeriesChart(
                 points = sinr,

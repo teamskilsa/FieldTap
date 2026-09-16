@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import com.fieldtap.R
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -54,9 +56,12 @@ fun rememberTopBarScroll(): TopBarScroll {
  * experimental opt-in in one place, so screens need none. Pass it to `Scaffold(topBar = ...)`, with a
  * [TopBarScroll] when the content under it scrolls.
  *
- * The back arrow shows only when both [onNavigateUp] and [navigateUpContentDescription] are given
- * ("Back" from a string resource); a full-screen dialog passes [FieldTapIcons.Close] as [navigationIcon]. Use
- * [TopBarAction] and [TopBarToggleAction] for actions, at most three plus an overflow menu.
+ * The back arrow shows whenever [onNavigateUp] is given, described "Back" unless
+ * [navigateUpContentDescription] says otherwise (a full-screen dialog passes "Cancel", with
+ * [FieldTapIcons.Close] as [navigationIcon]). The description used to be required alongside the callback,
+ * and a screen that passed only the callback silently lost its back arrow — a missing description is a
+ * TalkBack bug, not a reason to strand the user. Use [TopBarAction] and [TopBarToggleAction] for actions,
+ * at most three plus an overflow menu.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,7 +69,7 @@ fun FieldTapTopBar(
     title: String,
     modifier: Modifier = Modifier,
     onNavigateUp: (() -> Unit)? = null,
-    navigateUpContentDescription: String? = null,
+    navigateUpContentDescription: String = stringResource(R.string.action_back),
     scroll: TopBarScroll? = null,
     navigationIcon: ImageVector = FieldTapIcons.ArrowBack,
     actions: @Composable RowScope.() -> Unit = {},
@@ -94,7 +99,7 @@ fun FieldTapTopBar(
         },
         scrollBehavior = scroll?.behavior,
         navigationIcon = {
-            if (onNavigateUp != null && navigateUpContentDescription != null) {
+            if (onNavigateUp != null) {
                 IconButton(onClick = onNavigateUp) {
                     Icon(imageVector = navigationIcon, contentDescription = navigateUpContentDescription)
                 }

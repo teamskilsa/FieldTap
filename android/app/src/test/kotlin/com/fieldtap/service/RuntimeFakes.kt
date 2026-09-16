@@ -5,6 +5,7 @@ package com.fieldtap.service
 import com.fieldtap.app.SettingsRepository
 import com.fieldtap.core.input.MeasurementInput
 import com.fieldtap.core.nettest.DownloadOutcome
+import com.fieldtap.core.nettest.UploadOutcome
 import com.fieldtap.core.nettest.NetTestTransport
 import com.fieldtap.core.nettest.PingOutcome
 import com.fieldtap.core.nettest.TestSettings
@@ -197,6 +198,7 @@ internal class FakeFactory(private val dispatcher: CoroutineDispatcher) : Sessio
 internal class FakeTransport : NetTestTransport {
     val pings = AtomicInteger()
     val downloads = AtomicInteger()
+    val uploads = AtomicInteger()
 
     override suspend fun ping(target: String, count: Int, timeoutMs: Long): PingOutcome {
         pings.incrementAndGet()
@@ -208,6 +210,12 @@ internal class FakeTransport : NetTestTransport {
         downloads.incrementAndGet()
         delay(4_000)
         return DownloadOutcome.Completed(capBytes, 4.0, 200, capped = true)
+    }
+
+    override suspend fun upload(url: String, capBytes: Long, timeoutMs: Long): UploadOutcome {
+        uploads.incrementAndGet()
+        delay(4_000)
+        return UploadOutcome.Completed(capBytes, 4.0, 200)
     }
 }
 

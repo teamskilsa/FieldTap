@@ -64,6 +64,18 @@ class DiagClient:
 
     def _absorb_async(self, frame: bytes) -> bool:
         code = frame[0]
+        if code == protocol.DIAG_MULTI_LOG_F:
+            # A qmdl2 container from the handset's own diag_mdlog: unwrap and take
+            # every log packet inside it.
+            found = False
+            for packet in protocol.iter_qmdl2_log_packets(frame):
+                found = True
+                try:
+                    self._pending.append(protocol.parse_log_packet(packet))
+                    self.stats["logs"] += 1
+                except ValueError:
+                    self.stats["bad_logs"] += 1
+            return found
         if code == protocol.DIAG_LOG_F:
             try:
                 self._pending.append(protocol.parse_log_packet(frame))

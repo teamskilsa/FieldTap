@@ -23,9 +23,35 @@ class RoutesTest {
         val routes = listOf(
             Routes.DISCLOSURE, Routes.PERMISSIONS, Routes.ABOUT_ONBOARDING, Routes.LIVE, Routes.SESSIONS,
             Routes.SESSION_DETAIL, Routes.READINESS, Routes.PROBE, Routes.SETTINGS, Routes.TEST_TARGETS, Routes.ABOUT,
-            Routes.LIVE_GRAPH, Routes.SESSIONS_GRAPH, Routes.DIAGNOSTICS_GRAPH, Routes.SETTINGS_GRAPH,
+            Routes.TRAFFIC, Routes.CAPTURE_DETAIL,
+            Routes.LIVE_GRAPH, Routes.SESSIONS_GRAPH, Routes.TRAFFIC_GRAPH, Routes.SETTINGS_GRAPH,
         )
         assertEquals(routes.size, routes.toSet().size)
+    }
+
+    @Test
+    fun aCaptureNameFillsTheRouteTemplate() {
+        val route = Routes.capture("20260915-084412")
+
+        assertEquals("recordings/capture/20260915-084412", route)
+        assertEquals(Routes.CAPTURE_DETAIL.replace("{${Routes.ARG_CAPTURE_NAME}}", "20260915-084412"), route)
+    }
+
+    @Test
+    fun aCaptureNameIsEscapedIntoItsRoute() {
+        // Capture names are stamps, but the route builder must not hand a stray "/" to the nav graph.
+        assertEquals("recordings/capture/a%2Fb", Routes.capture("a/b"))
+    }
+
+    @Test
+    fun everyTabsRootLivesInItsOwnGraph() {
+        assertEquals(TopTab.entries.size, TopTab.entries.map { it.graph }.toSet().size)
+        assertEquals(TopTab.entries.size, TopTab.entries.map { it.root }.toSet().size)
+    }
+
+    @Test
+    fun theTabsAreSignalTrafficLogsSettingsInThatOrder() {
+        assertEquals(listOf(TopTab.SIGNAL, TopTab.TRAFFIC, TopTab.LOGS, TopTab.SETTINGS), TopTab.entries)
     }
 
     @Test

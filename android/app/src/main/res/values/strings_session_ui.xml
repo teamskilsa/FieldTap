@@ -66,9 +66,6 @@
     <string name="exit_package_updated">an app update</string>
 
     <!-- Bottom navigation tabs -->
-    <string name="nav_live">Live</string>
-    <string name="nav_sessions">Sessions</string>
-    <string name="nav_diagnostics">Diagnostics</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Live screen -->
@@ -139,6 +136,8 @@
     <string name="live_network_nr_sa">5G NR standalone</string>
     <string name="live_network_other">Not LTE or NR</string>
     <string name="live_nsa_leg">5G NR leg</string>
+    <!-- A carrier the phone is aggregating beside the serving cell (carrier aggregation). -->
+    <string name="live_aggregated_leg">Aggregated carrier</string>
 
     <!-- How often Android refreshes cell info; docs/APP-PLAN.md labels pocket mode "10 s cadence". -->
     <string name="live_cadence_short">2 s cadence</string>
@@ -149,21 +148,14 @@
     <string name="live_cadence_wifi_on_battery">Wi-Fi on while not charging</string>
     <string name="live_cadence_charging">Charging keeps 2 s with Wi-Fi on</string>
     <string name="live_cadence_screen_on">Screen on, Wi-Fi off</string>
-    <string name="live_row_measured_interval">Time between fresh samples</string>
-    <string name="live_row_cadence_reason">Why this cadence</string>
-    <string name="live_walk_mode">Walk mode</string>
-    <!-- The walk mode icon's state for TalkBack. -->
-    <string name="live_walk_mode_on">On</string>
-    <string name="live_walk_mode_off">Off</string>
-    <string name="live_walk_mode_details_action">How walk mode works</string>
-    <string name="live_walk_mode_details">Walk mode keeps the screen on with a dark surface, so Android can refresh cell information every 2 s. Brightness follows your phone, and no wake lock is used. In a pocket with the screen off, Android refreshes only every 10 s and, on battery, sends no signal-strength updates.</string>
-    <string name="live_walk_mode_details_close">Close</string>
-    <string name="live_section_cadence_details">Cadence details</string>
-    <string name="live_walk_wifi_prompt">Wi-Fi is connected and the phone is not charging, so Android refreshes cell info only every 10 s. Turn Wi-Fi off for 2 s updates. A charger helps only once Android counts the phone as charging, which can take 15 minutes.</string>
+    <string name="live_row_measured_interval">Between fresh samples</string>
+    <string name="live_row_cadence_reason">Why</string>
+    <string name="live_section_cadence_details">How often it samples</string>
+    <string name="live_wifi_cadence_prompt">Wi-Fi is on and the phone is not charging, so Android refreshes the cell only every 10 s. Turn Wi-Fi off for 2 s updates. Plugging in helps only once Android counts the phone as charging, which can take 15 minutes.</string>
     <string name="live_action_wifi_settings">Wi-Fi settings</string>
 
     <string name="live_note_push_missing">Phone permission not granted: no push updates. Requests every second still run.</string>
-    <string name="live_note_request_missing">Precise location is not allowed, so Android returns no cell information.</string>
+    <string name="live_note_request_missing">Precise location is not allowed, so Android returns no cell.</string>
     <string name="live_action_allow_location">Allow precise location</string>
     <!-- %1$s is one of the live_listener_* names. -->
     <string name="live_note_listener_refused">Android does not allow %1$s updates on this phone.</string>
@@ -217,11 +209,31 @@
     <!-- %1$d satellites used in the fix, %2$d visible. Reads the same for any count, so it is no plural. -->
     <string name="live_satellites_value" tools:ignore="PluralsCandidate">%1$d used of %2$d</string>
 
+    <!-- The serving cells used since Live opened, newest first. -->
+    <!-- Session detail's RSRP chart. %1$s is the RAT, e.g. LTE. -->
+    <string name="detail_section_trace">%1$s RSRP over the session</string>
+    <!-- %1$d is the lowest RSRP, %2$d the highest. -->
+    <string name="detail_trace_range">%1$d to %2$d dBm</string>
+    <string name="live_section_serving_history">Serving cell history</string>
+    <string name="live_history_serving_now">serving now</string>
+    <!-- %1$s is a duration like "2:14". -->
+    <string name="live_history_held">held %1$s</string>
     <string name="live_section_neighbours">Neighbour cells</string>
     <string name="live_neighbours_none">No neighbour cells in the newest answer.</string>
+    <!-- Neighbour cells that reuse the serving cell's PCI resources. %1$s is a list like "3, 6". -->
+    <string name="live_pci_reuse">reuses PCI mod %1$s</string>
+    <string name="live_pci_reuse_separator">", "</string>
+    <!-- How far below the serving cell a neighbour is. %1$d is always positive here. -->
+    <string name="live_margin_below">%1$d dB below serving</string>
+    <string name="live_margin_above">%1$d dB above serving</string>
+    <string name="live_margin_level">level with serving</string>
     <plurals name="live_neighbours_count">
         <item quantity="one">%1$d cell in the newest answer</item>
         <item quantity="other">%1$d cells in the newest answer</item>
+    </plurals>
+    <plurals name="live_serving_history_count">
+        <item quantity="one">%1$d cell</item>
+        <item quantity="other">%1$d cells</item>
     </plurals>
 
     <string name="live_limits_title">What FieldTap reads</string>
@@ -268,7 +280,7 @@
     <string name="live_tests_targets_download">Uses mobile data: downloads from %1$s, as set in Settings. Ping is off.</string>
     <string name="live_tests_targets_none">Both tests are off in Settings.</string>
     <!-- %1$s is the local time, e.g. 14:30. -->
-    <string name="live_default_name">Walk %1$s</string>
+    <string name="live_default_name">Session %1$s</string>
     <string name="live_start_confirm">Start</string>
 
     <string name="live_mark_dialog_title">Add a marker</string>
@@ -287,6 +299,7 @@
     <string name="live_message_paused_no_fix">Marks are off until your location is known</string>
     <string name="live_message_start_failed">The session could not start. Try again.</string>
     <string name="live_message_stop_failed">The session could not be stopped. Try again.</string>
+    <string name="live_message_started_with_advice">Recording. Some things could cost samples — see Diagnostics.</string>
 
     <!-- Pre-start sheet -->
     <string name="prestart_title">Before you start</string>
@@ -331,21 +344,26 @@
     <string name="issue_check_failed_title">The readiness check could not run</string>
     <string name="issue_check_failed_detail">Some settings could not be read. The session may still record normally.</string>
 
+    <!-- The Live screen's view switcher: three views of the same cell. -->
+    <string name="live_view_signal">Signal</string>
+    <string name="live_view_cell">Cell</string>
+    <string name="live_view_neighbours">Neighbours</string>
+
     <!-- Sessions list -->
-    <string name="sessions_title">Sessions</string>
-    <!-- The list's section header, e.g. "3 sessions"; %1$d is the count. -->
+    <string name="sessions_title">Recordings</string>
+    <!-- The list's section header, e.g. "3 recordings"; %1$d is the count. -->
     <plurals name="sessions_count">
-        <item quantity="one">%1$d session</item>
-        <item quantity="other">%1$d sessions</item>
+        <item quantity="one">%1$d recording</item>
+        <item quantity="other">%1$d recordings</item>
     </plurals>
     <string name="sessions_refresh">Refresh</string>
-    <string name="sessions_loading">Reading sessions…</string>
-    <string name="sessions_empty_title">No sessions yet</string>
-    <string name="sessions_empty_message">Start a session on the Live screen. Sessions stay on this phone until you share or delete them.</string>
+    <string name="sessions_loading">Reading…</string>
+    <string name="sessions_empty_title">Nothing recorded yet</string>
+    <string name="sessions_empty_message">Record on Live. Everything stays on this phone until you share or delete it.</string>
     <string name="sessions_empty_action">Go to Live</string>
-    <string name="sessions_error_title">Could not read the sessions</string>
-    <string name="sessions_error_message">The storage could not be read. Try again in a moment.</string>
-    <string name="sessions_stale_banner">The list could not be refreshed, so it may be out of date.</string>
+    <string name="sessions_error_title">Could not read them</string>
+    <string name="sessions_error_message">Storage could not be read. Try again in a moment.</string>
+    <string name="sessions_stale_banner">This list may be out of date.</string>
     <string name="sessions_storage_title">Storage</string>
     <string name="sessions_row_used">Used by sessions</string>
     <!-- %1$s used, %2$s the cap, both from Formats.decimalBytes. -->

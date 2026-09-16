@@ -19,7 +19,7 @@ class TestSettingsFormTest {
     fun theDefaultsShowInDisplayUnitsAndParseBackUnchanged() {
         val form = TestSettingsForm.from(defaults)
 
-        assertEquals(TestSettingsForm("8.8.8.8", "60", "5", TestSettings.DEFAULT_DOWNLOAD_URL, "5", "10", "100"), form)
+        assertEquals(TestSettingsForm("8.8.8.8", "60", "5", TestSettings.DEFAULT_DOWNLOAD_URL, "5", "10", "", "5", "2", "100"), form)
         assertEquals(TestSettingsParse.Valid(defaults), form.parse(defaults))
     }
 
@@ -41,7 +41,7 @@ class TestSettingsFormTest {
     fun parsingConvertsDisplayUnitsTrimsTextAndKeepsTheTimeout() {
         val base = defaults.copy(pingTimeoutMs = 3_000)
 
-        val parsed = TestSettingsForm(" 10.0.2.2 ", "30", "3", " https://example.com/1mb ", "2", "1", "20").parse(base)
+        val parsed = TestSettingsForm(" 10.0.2.2 ", "30", "3", " https://example.com/1mb ", "2", "1", "", "5", "2", "20").parse(base)
 
         assertEquals(
             TestSettingsParse.Valid(
@@ -221,4 +221,43 @@ class TestSettingsFormTest {
         (form.parse(defaults) as TestSettingsParse.Invalid).problems
 
     private fun outOfRange(field: TestSettingsField) = TestSettingsProblem(field, TestSettingsProblemKind.OUT_OF_RANGE)
+
+    @Test
+    fun uploadIsOffByDefaultAndItsFieldsStillShow() {
+        val form = TestSettingsForm.from(defaults)
+        assertEquals("", form.uploadUrl)
+        assertEquals("5", form.uploadIntervalMin)
+        assertEquals("2", form.uploadCapMb)
+        assertEquals(TestSettingsParse.Valid(defaults), form.parse(defaults))
+    }
+
+    @Test
+    fun anUploadUrlThatIsNotHttpsIsRejected() {
+        val problems = TestSettingsRules.problems(defaults.copy(uploadUrl = "http://example.com/up"))
+        assertEquals(listOf(TestSettingsField.UPLOAD_URL), problems.map { it.field })
+    }
+
+    @Test
+    fun theBudgetMustHoldWhicheverTransferIsOn() {
+        // Download off, upload on with a 2 MB cap and a 1 MB budget: the budget is the problem.
+        val tooSmall = defaults.copy(
+            downloadUrl = null,
+            uploadUrl = "https://example.com/up",
+            uploadCapBytes = 2_000_000,
+            sessionBudgetBytes = 1_000_000,
+        )
+        assertEquals(
+            listOf(TestSettingsField.SESSION_BUDGET),
+            TestSettingsRules.problems(tooSmall).map { it.field },
+        )
+        // The same budget is fine once the upload is off again.
+        assertTrue(TestSettingsRules.problems(tooSmall.copy(uploadUrl = null)).isEmpty())
+    }
+
+    @Test
+    fun turningTheUploadOnIsAnUnsavedChange() {
+        val form = TestSettingsForm.from(defaults)
+        assertFalse(form.hasUnsavedChanges(defaults))
+        assertTrue(form.copy(uploadUrl = "https://example.com/up").hasUnsavedChanges(defaults))
+    }
 }

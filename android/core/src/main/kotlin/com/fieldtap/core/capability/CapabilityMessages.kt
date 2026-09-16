@@ -17,8 +17,8 @@ object CapabilityMessages {
 
     /** Tier 1 — public-API measurements, always available. The hero lede on the Capability screen. */
     fun tier1(): String =
-        "Measures serving-cell RSRP, RSRQ and SINR, band, ARFCN and service state, and logs a walk — " +
-            "on any phone, no root."
+        "Measures serving-cell RSRP, RSRQ and SINR, band, ARFCN and service state, and records a " +
+            "session — on any phone, no root."
 
     /**
      * Tier 1's short form for the tiered-verdict row, so the Public-API row does not repeat the hero lede ([tier1]) word

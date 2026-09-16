@@ -1550,7 +1550,8 @@
           "unit": null,
           "values": [
             "ping",
-            "download"
+            "download",
+            "upload"
           ],
           "pattern": null,
           "list_allowed": false,
@@ -3264,11 +3265,13 @@
   "traffic_tests": {
     "app": [
       "ping",
-      "download"
+      "download",
+      "upload"
     ],
     "laptop": [
       "ping",
       "download",
+      "upload",
       "iperf3"
     ]
   },

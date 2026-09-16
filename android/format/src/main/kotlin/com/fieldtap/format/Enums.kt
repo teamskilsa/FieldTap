@@ -66,6 +66,7 @@ enum class FixProvider(val wire: String) {
 enum class TrafficTest(val wire: String) {
     PING("ping"),
     DOWNLOAD("download"),
+    UPLOAD("upload"),
 }
 
 /** `privacy.location_precision`, and the choice made when exporting a copy. */

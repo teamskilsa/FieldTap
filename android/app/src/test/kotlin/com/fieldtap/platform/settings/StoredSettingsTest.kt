@@ -24,7 +24,7 @@ class StoredSettingsTest {
 
     @Test
     fun storedSettingsNeedNoRepair() {
-        val stored = AppSettings(installId = "3f1c2b8e-7a4d-4c55-8f0e-6b7d9a1c2e33", testsDefaultOn = true, walkModeDefault = true)
+        val stored = AppSettings(installId = "3f1c2b8e-7a4d-4c55-8f0e-6b7d9a1c2e33", testsDefaultOn = true)
 
         val decoded = StoredSettings.decode(AppSettingsCodec.encode(stored)) { "never-used" }
 

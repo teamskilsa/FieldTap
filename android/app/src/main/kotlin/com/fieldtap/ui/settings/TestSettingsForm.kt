@@ -25,7 +25,15 @@ enum class TestSettingsField(val unit: Long, val displayRange: LongRange) {
     /** MB (1 000 000 bytes). */
     DOWNLOAD_CAP(1_000_000, 1L..1_000L),
 
-    /** MB (1 000 000 bytes); 0 turns downloads off for the session. */
+    UPLOAD_URL(1, LongRange.EMPTY),
+
+    /** Minutes. */
+    UPLOAD_INTERVAL(60_000, 1L..1_440L),
+
+    /** MB (1 000 000 bytes). Smaller than the download's: uplink is the dearer direction. */
+    UPLOAD_CAP(1_000_000, 1L..200L),
+
+    /** MB (1 000 000 bytes); 0 turns transfers off for the session. */
     SESSION_BUDGET(1_000_000, 0L..10_000L),
     ;
 
@@ -83,8 +91,20 @@ object TestSettingsRules {
         }
         checkRange(problems, TestSettingsField.DOWNLOAD_INTERVAL, tests.downloadIntervalMs)
         val capValid = checkRange(problems, TestSettingsField.DOWNLOAD_CAP, tests.downloadCapBytes)
+        val uploadUrl = tests.uploadUrl?.trim().orEmpty()
+        val uploadOn = uploadUrl.isNotEmpty()
+        if (uploadOn) {
+            urlProblem(uploadUrl)?.let { kind -> problems += TestSettingsProblem(TestSettingsField.UPLOAD_URL, kind) }
+        }
+        checkRange(problems, TestSettingsField.UPLOAD_INTERVAL, tests.uploadIntervalMs)
+        val uploadCapValid = checkRange(problems, TestSettingsField.UPLOAD_CAP, tests.uploadCapBytes)
         val budgetValid = checkRange(problems, TestSettingsField.SESSION_BUDGET, tests.sessionBudgetBytes)
-        if (downloadOn && capValid && budgetValid && tests.sessionBudgetBytes < tests.downloadCapBytes) {
+        // The budget has to hold whichever transfer is on; both spend it.
+        val needed = listOfNotNull(
+            tests.downloadCapBytes.takeIf { downloadOn && capValid },
+            tests.uploadCapBytes.takeIf { uploadOn && uploadCapValid },
+        ).maxOrNull()
+        if (needed != null && budgetValid && tests.sessionBudgetBytes < needed) {
             problems += TestSettingsProblem(TestSettingsField.SESSION_BUDGET, TestSettingsProblemKind.BUDGET_BELOW_CAP)
         }
         return problems
@@ -150,6 +170,9 @@ internal data class TestSettingsForm(
     val downloadUrl: String,
     val downloadIntervalMin: String,
     val downloadCapMb: String,
+    val uploadUrl: String,
+    val uploadIntervalMin: String,
+    val uploadCapMb: String,
     val sessionBudgetMb: String,
 ) {
     fun parse(base: TestSettings): TestSettingsParse {
@@ -163,12 +186,21 @@ internal data class TestSettingsForm(
         val count = number(pingCount, TestSettingsField.PING_COUNT)
         val downloadInterval = number(downloadIntervalMin, TestSettingsField.DOWNLOAD_INTERVAL)
         val cap = number(downloadCapMb, TestSettingsField.DOWNLOAD_CAP)
+        val uploadInterval = number(uploadIntervalMin, TestSettingsField.UPLOAD_INTERVAL)
+        val uploadCap = number(uploadCapMb, TestSettingsField.UPLOAD_CAP)
         val budget = number(sessionBudgetMb, TestSettingsField.SESSION_BUDGET)
         val target = pingTarget.trim()
         val url = downloadUrl.trim().ifEmpty { null }
-        if (pingInterval == null || count == null || downloadInterval == null || cap == null || budget == null) {
-            val textProblems = TestSettingsRules.problems(base.copy(pingTarget = target, downloadUrl = url)).filter { problem ->
-                problem.field == TestSettingsField.PING_TARGET || problem.field == TestSettingsField.DOWNLOAD_URL
+        val upUrl = uploadUrl.trim().ifEmpty { null }
+        if (pingInterval == null || count == null || downloadInterval == null || cap == null ||
+            uploadInterval == null || uploadCap == null || budget == null
+        ) {
+            val textProblems = TestSettingsRules.problems(
+                base.copy(pingTarget = target, downloadUrl = url, uploadUrl = upUrl),
+            ).filter { problem ->
+                problem.field == TestSettingsField.PING_TARGET ||
+                    problem.field == TestSettingsField.DOWNLOAD_URL ||
+                    problem.field == TestSettingsField.UPLOAD_URL
             }
             return TestSettingsParse.Invalid((numberProblems + textProblems).sortedBy { it.field.ordinal })
         }
@@ -179,6 +211,9 @@ internal data class TestSettingsForm(
             downloadUrl = url,
             downloadIntervalMs = downloadInterval * TestSettingsField.DOWNLOAD_INTERVAL.unit,
             downloadCapBytes = cap * TestSettingsField.DOWNLOAD_CAP.unit,
+            uploadUrl = upUrl,
+            uploadIntervalMs = uploadInterval * TestSettingsField.UPLOAD_INTERVAL.unit,
+            uploadCapBytes = uploadCap * TestSettingsField.UPLOAD_CAP.unit,
             sessionBudgetBytes = budget * TestSettingsField.SESSION_BUDGET.unit,
         )
         val problems = TestSettingsRules.problems(settings)
@@ -208,6 +243,9 @@ internal data class TestSettingsForm(
             downloadUrl = tests.downloadUrl.orEmpty(),
             downloadIntervalMin = display(tests.downloadIntervalMs, TestSettingsField.DOWNLOAD_INTERVAL),
             downloadCapMb = display(tests.downloadCapBytes, TestSettingsField.DOWNLOAD_CAP),
+            uploadUrl = tests.uploadUrl.orEmpty(),
+            uploadIntervalMin = display(tests.uploadIntervalMs, TestSettingsField.UPLOAD_INTERVAL),
+            uploadCapMb = display(tests.uploadCapBytes, TestSettingsField.UPLOAD_CAP),
             sessionBudgetMb = display(tests.sessionBudgetBytes, TestSettingsField.SESSION_BUDGET),
         )
 

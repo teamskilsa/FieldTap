@@ -368,6 +368,7 @@ fun ProbeScreen(
     viewModel: ProbeViewModel,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    onOpenSignalling: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val problem by viewModel.problem.collectAsStateWithLifecycle()
@@ -421,6 +422,7 @@ fun ProbeScreen(
         onCheckRoot = viewModel::checkWithRoot,
         onExportCapability = viewModel::exportCapability,
         onRetryCapability = viewModel::refreshCapability,
+        onOpenSignalling = onOpenSignalling,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
     )
@@ -451,6 +453,7 @@ internal fun ProbeContent(
     state: ProbeUiState,
     problem: ProbeProblem?,
     exporting: Boolean,
+    onOpenSignalling: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     onRun: () -> Unit,
     onStop: () -> Unit,
@@ -492,6 +495,7 @@ internal fun ProbeContent(
                     rootProbe = capability.rootProbe,
                     checkingRoot = capability.checkingRoot,
                     onCheckRoot = onCheckRoot,
+                    onOpenSignalling = onOpenSignalling,
                     modifier = Modifier.setupContentWidth(),
                 )
             }
@@ -703,6 +707,7 @@ private fun RootDiagnosticsCard(
     rootProbe: RootProbeResult?,
     checkingRoot: Boolean,
     onCheckRoot: () -> Unit,
+    onOpenSignalling: (() -> Unit)?,
     modifier: Modifier,
 ) {
     val labels = deepDiagnosticsLabels()
@@ -727,6 +732,20 @@ private fun RootDiagnosticsCard(
             Text(text = stringResource(if (checkingRoot) R.string.probe_checking_root else R.string.probe_check_root))
         }
         SetupParagraph(text = stringResource(R.string.probe_check_root_consequence))
+        // Signalling capture lives behind the root card because that is what it needs. It is offered
+        // whatever the confidence says: the verdict is a guess from what is readable without asking,
+        // and the only certain answer is what the superuser app says when the capture asks for itself.
+        if (onOpenSignalling != null) {
+            SectionDivider()
+            SetupParagraph(text = stringResource(R.string.probe_signalling_blurb))
+            OutlinedButton(
+                onClick = onOpenSignalling,
+                shape = ShapeRoles.Control,
+                modifier = Modifier.heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Text(text = stringResource(R.string.probe_open_signalling))
+            }
+        }
         SectionDivider()
         DeepDiagnosticsSection(root = root, usb = usb, rootProbe = rootProbe, labels = labels)
         SectionDivider()

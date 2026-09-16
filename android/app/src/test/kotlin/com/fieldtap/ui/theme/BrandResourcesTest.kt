@@ -7,6 +7,7 @@ import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.math.hypot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
@@ -21,10 +22,17 @@ class BrandResourcesTest {
 
     @Test
     fun windowAndSplashColoursEqualTheComposeSurfaces() {
-        assertEquals(hex(FieldTapColorSchemes.Light.surface), colors["window_background_light"])
         assertEquals(hex(FieldTapColorSchemes.Dark.surface), colors["window_background_dark"])
-        assertEquals(hex(FieldTapColorSchemes.Light.primary), colors["brand_primary_light"])
         assertEquals(hex(FieldTapColorSchemes.Dark.primary), colors["brand_primary_dark"])
+    }
+
+    @Test
+    fun theWindowIsDarkEvenWhenThePhoneIsLight() {
+        // The app always draws the dark scheme (MainActivity forces it). A light window under it would
+        // flash before the first frame on every phone set to light mode.
+        val light = java.io.File("src/main/res/values/themes.xml").readText()
+        assertTrue(light.contains("@color/window_background_dark"))
+        assertFalse(light.contains("@color/window_background_light"))
     }
 
     @Test

@@ -164,10 +164,13 @@ class NetTestRunnerTest {
         val calls = mutableListOf<Pair<TrafficTest, Long>>()
         val pings = mutableListOf<Triple<String, Int, Long>>()
         val downloads = mutableListOf<Triple<String, Long, Long>>()
+        val uploads = mutableListOf<Triple<String, Long, Long>>()
         var pingMs = 4_000L
         var downloadMs = 4_000L
+        var uploadMs = 4_000L
         var ping: () -> PingOutcome = { PingOutcome.Replies(5, listOf(40.0, 42.0, 44.0, 46.0, 48.0), 4.0) }
         var download: () -> DownloadOutcome = { DownloadOutcome.Completed(10_000_000, 4.0, 200, capped = true) }
+        var upload: () -> UploadOutcome = { UploadOutcome.Completed(2_000_000, 4.0, 200) }
 
         override suspend fun ping(target: String, count: Int, timeoutMs: Long): PingOutcome {
             calls += TrafficTest.PING to now()
@@ -181,6 +184,13 @@ class NetTestRunnerTest {
             downloads += Triple(url, capBytes, timeoutMs)
             delay(downloadMs)
             return download.invoke()
+        }
+
+        override suspend fun upload(url: String, capBytes: Long, timeoutMs: Long): UploadOutcome {
+            calls += TrafficTest.UPLOAD to now()
+            uploads += Triple(url, capBytes, timeoutMs)
+            delay(uploadMs)
+            return upload.invoke()
         }
     }
 

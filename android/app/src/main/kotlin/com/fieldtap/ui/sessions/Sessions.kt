@@ -59,6 +59,8 @@ import com.fieldtap.app.AppGraph
 import com.fieldtap.app.SessionDetail
 import com.fieldtap.app.SessionSummary
 import com.fieldtap.core.export.ExportResult
+import com.fieldtap.data.CaptureStore
+import com.fieldtap.data.SavedCapture
 import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
@@ -67,8 +69,8 @@ import com.fieldtap.format.LocationPrecision
 import com.fieldtap.format.SessionFile
 import com.fieldtap.format.SessionMeta
 import com.fieldtap.ui.FieldTapTheme
-import com.fieldtap.ui.common.DayDistance
 import com.fieldtap.ui.common.DisplayTime
+import com.fieldtap.ui.common.startedWords
 import com.fieldtap.ui.common.FileSharer
 import com.fieldtap.ui.common.StopKind
 import com.fieldtap.ui.common.StopReasons
@@ -90,6 +92,9 @@ import com.fieldtap.ui.components.MetricGrid
 import com.fieldtap.ui.components.MetricTile
 import com.fieldtap.ui.components.RadioRow
 import com.fieldtap.ui.components.RecordingChip
+import com.fieldtap.ui.components.TimeSeriesChart
+import com.fieldtap.core.live.ChartPoint
+import com.fieldtap.ui.theme.FieldTapDesign
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SessionListRow
 import com.fieldtap.ui.components.SessionRowStatus
@@ -101,12 +106,15 @@ import com.fieldtap.ui.theme.FieldTapIcons
 import com.fieldtap.ui.theme.Formats
 import com.fieldtap.ui.theme.ShapeRoles
 import com.fieldtap.ui.theme.SignalMetric
+import com.fieldtap.ui.theme.SignalQuality
 import com.fieldtap.ui.theme.SignalScale
 import com.fieldtap.ui.theme.Sizes
 import com.fieldtap.ui.theme.Spacing
 import com.fieldtap.ui.theme.StatusTone
 import com.fieldtap.ui.theme.tabular
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -116,22 +124,34 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SessionsUiState(
     val loading: Boolean,
     val sessions: List<SessionSummary>,
     val storage: StorageStatus?,
+    /** Signalling captures kept on the phone; listed beside the drives, newest first. */
+    val captures: List<SavedCapture> = emptyList(),
     /** The last refresh failed; [sessions] and [storage] are what was read before it. */
     val loadFailed: Boolean = false,
 )
 
 /**
- * The Sessions list. [refresh] reads the list and storage off the main thread (inside the repository); the
- * screen calls it whenever it resumes, and the view model calls it when a session starts or ends.
+ * The Recordings list. [refresh] reads the drives, the captures and storage off the main thread; the screen
+ * calls it whenever it resumes, and the view model calls it when a session starts or ends.
+ *
+ * Drives and signalling captures are listed together because they are the same thing to the person holding
+ * the phone: something recorded earlier, worth opening again. They were two lists in two tabs, and nobody
+ * could remember which tab held which.
  *
  * Owner: workstream `ui-session`.
  */
-class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
+class SessionsViewModel(
+    private val graph: AppGraph,
+    private val captures: CaptureStore,
+    /** Where the capture store is walked. Injected so a test can make the read deterministic. */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(SessionsUiState(loading = true, sessions = emptyList(), storage = null))
     private var refreshJob: Job? = null
 
@@ -160,8 +180,22 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
                 } catch (e: Exception) {
                     null
                 }
+                // A phone with no root has no captures and never will; an unreadable store is empty, not an error.
+                val kept = withContext(io) {
+                    try {
+                        captures.list()
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
                 mutableState.update { previous ->
-                    SessionsUiState(loading = false, sessions = sessions, storage = storage ?: previous.storage, loadFailed = false)
+                    SessionsUiState(
+                        loading = false,
+                        sessions = sessions,
+                        storage = storage ?: previous.storage,
+                        captures = kept,
+                        loadFailed = false,
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -187,8 +221,12 @@ class SessionsViewModel(private val graph: AppGraph) : ViewModel() {
 fun SessionsScreen(
     viewModel: SessionsViewModel,
     onOpenSession: (dirName: String) -> Unit,
+    onOpenCapture: (name: String) -> Unit,
     onGoToLive: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
+    /** Drawn above the list, and above the empty state: the Logs tab's record controls. */
+    header: (@Composable () -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
@@ -196,10 +234,36 @@ fun SessionsScreen(
         state = state,
         nowUtcMs = viewModel.nowWallMs(),
         onOpenSession = onOpenSession,
+        onOpenCapture = onOpenCapture,
         onGoToLive = onGoToLive,
         onRefresh = viewModel::refresh,
         modifier = modifier,
+        title = title,
+        header = header,
     )
+}
+
+/**
+ * One row of the Recordings list: a drive or a signalling capture. They sort together by when they started,
+ * which is the only order anyone looks for them in.
+ */
+internal sealed interface Recording {
+    val startedUtcMs: Long
+
+    data class Drive(val summary: SessionSummary, override val startedUtcMs: Long) : Recording
+
+    data class Capture(val capture: SavedCapture) : Recording {
+        override val startedUtcMs: Long get() = capture.startedUtcMs
+    }
+}
+
+/**
+ * The two kinds merged, newest first. A drive with no start time in its `session.json` has nothing to sort
+ * by, so it keeps its place at the front rather than sinking to 1970.
+ */
+internal fun recordingsOf(state: SessionsUiState): List<Recording> {
+    val drives = state.sessions.map { Recording.Drive(it, it.startedUtcMs ?: Long.MAX_VALUE) }
+    return (drives + state.captures.map { Recording.Capture(it) }).sortedByDescending { it.startedUtcMs }
 }
 
 sealed interface ExportState {
@@ -382,11 +446,15 @@ private fun SessionsContent(
     state: SessionsUiState,
     nowUtcMs: Long,
     onOpenSession: (String) -> Unit,
+    onOpenCapture: (String) -> Unit,
     onGoToLive: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String? = null,
+    header: (@Composable () -> Unit)? = null,
 ) {
-    val showLoading = rememberDelayedVisibility(state.loading && state.sessions.isEmpty())
+    val recordings = recordingsOf(state)
+    val showLoading = rememberDelayedVisibility(state.loading && recordings.isEmpty())
     val topBarScroll = rememberTopBarScroll()
     Scaffold(
         modifier = modifier.nestedScroll(topBarScroll.connection),
@@ -394,7 +462,7 @@ private fun SessionsContent(
             // A tab root: no Back arrow — the bottom tab bar is how you leave.
             FieldTapTopBar(
                 scroll = topBarScroll,
-                title = stringResource(R.string.sessions_title),
+                title = title ?: stringResource(R.string.sessions_title),
                 actions = {
                     TopBarAction(
                         icon = FieldTapIcons.Refresh,
@@ -409,10 +477,20 @@ private fun SessionsContent(
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                state.sessions.isEmpty() && state.loading -> if (showLoading) {
+                // With record controls above it, the list is never replaced by a centred empty state:
+                // the controls are how the list stops being empty.
+                header != null -> SessionsList(
+                    state = state,
+                    recordings = recordings,
+                    nowUtcMs = nowUtcMs,
+                    onOpenSession = onOpenSession,
+                    onOpenCapture = onOpenCapture,
+                    header = header,
+                )
+                recordings.isEmpty() && state.loading -> if (showLoading) {
                     CenteredContent { LoadingState(message = stringResource(R.string.sessions_loading)) }
                 }
-                state.sessions.isEmpty() && state.loadFailed -> CenteredContent {
+                recordings.isEmpty() && state.loadFailed -> CenteredContent {
                     EmptyState(
                         title = stringResource(R.string.sessions_error_title),
                         message = stringResource(R.string.sessions_error_message),
@@ -422,7 +500,7 @@ private fun SessionsContent(
                         onAction = onRefresh,
                     )
                 }
-                state.sessions.isEmpty() -> CenteredContent {
+                recordings.isEmpty() -> CenteredContent {
                     EmptyState(
                         title = stringResource(R.string.sessions_empty_title),
                         message = stringResource(R.string.sessions_empty_message),
@@ -431,14 +509,27 @@ private fun SessionsContent(
                         onAction = onGoToLive,
                     )
                 }
-                else -> SessionsList(state = state, nowUtcMs = nowUtcMs, onOpenSession = onOpenSession)
+                else -> SessionsList(
+                    state = state,
+                    recordings = recordings,
+                    nowUtcMs = nowUtcMs,
+                    onOpenSession = onOpenSession,
+                    onOpenCapture = onOpenCapture,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: (String) -> Unit) {
+private fun SessionsList(
+    state: SessionsUiState,
+    recordings: List<Recording>,
+    nowUtcMs: Long,
+    onOpenSession: (String) -> Unit,
+    onOpenCapture: (String) -> Unit,
+    header: (@Composable () -> Unit)? = null,
+) {
     val storage = state.storage
     val labels = signalQualityLabels()
     // The full card with its bar only when storage needs attention; otherwise a compact meter under the header, so the
@@ -450,6 +541,9 @@ private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: 
         verticalArrangement = Arrangement.spacedBy(Spacing.Md),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (header != null) {
+            item(key = "header") { androidx.compose.foundation.layout.Box(Modifier.contentWidth()) { header() } }
+        }
         if (state.loadFailed) {
             item(key = "stale") {
                 StatusBanner(
@@ -474,25 +568,92 @@ private fun SessionsList(state: SessionsUiState, nowUtcMs: Long, onOpenSession: 
         } else if (storage != null) {
             item(key = "storage-meter") { StorageMeter(storage = storage, modifier = Modifier.contentWidth()) }
         }
+        if (header != null && recordings.isEmpty()) {
+            item(key = "none") {
+                Text(
+                    text = if (state.loading) stringResource(R.string.sessions_loading) else stringResource(R.string.sessions_empty_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.contentWidth().padding(top = Spacing.Sm),
+                )
+            }
+            return@LazyColumn
+        }
         item(key = "list-header") {
             Eyebrow(
-                text = pluralStringResource(R.plurals.sessions_count, state.sessions.size, state.sessions.size),
+                text = pluralStringResource(R.plurals.sessions_count, recordings.size, recordings.size),
                 heading = true,
                 modifier = Modifier
                     .contentWidth()
                     .padding(top = Spacing.Xs),
             )
         }
-        items(state.sessions, key = { it.dirName }) { summary ->
-            SessionRow(
-                summary = summary,
-                nowUtcMs = nowUtcMs,
-                labels = labels,
-                onOpen = { onOpenSession(summary.dirName) },
-                modifier = Modifier.contentWidth(),
-            )
+        items(recordings, key = { it.key() }) { recording ->
+            when (recording) {
+                is Recording.Drive -> SessionRow(
+                    summary = recording.summary,
+                    nowUtcMs = nowUtcMs,
+                    labels = labels,
+                    onOpen = { onOpenSession(recording.summary.dirName) },
+                    modifier = Modifier.contentWidth(),
+                )
+
+                is Recording.Capture -> CaptureRow(
+                    capture = recording.capture,
+                    nowUtcMs = nowUtcMs,
+                    onOpen = { onOpenCapture(recording.capture.name) },
+                    modifier = Modifier.contentWidth(),
+                )
+            }
         }
     }
+}
+
+/** A directory name is unique within its own store, but a drive and a capture could share one. */
+internal fun Recording.key(): String = when (this) {
+    is Recording.Drive -> "drive:" + summary.dirName
+    is Recording.Capture -> "capture:" + capture.name
+}
+
+/**
+ * One signalling capture in the Recordings list, wearing the same row as a drive so the list reads as one
+ * list. What it says instead of a signal quality is what was in it: the NAS messages, and in the error
+ * colour when the network refused something, because a reject is the reason anyone opens a capture at all.
+ */
+@Composable
+private fun CaptureRow(
+    capture: SavedCapture,
+    nowUtcMs: Long,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val startedText = startedWords(capture.startedUtcMs, nowUtcMs)
+    val sizeText = Formats.decimalBytes(capture.bytes)
+    val kind = stringResource(R.string.recordings_capture_kind)
+    val chip = when {
+        capture.rejects > 0 -> stringResource(R.string.recordings_capture_rejects, capture.rejects)
+        capture.hasSignalling -> stringResource(R.string.recordings_capture_messages, capture.messages)
+        else -> stringResource(R.string.recordings_capture_quiet)
+    }
+    SessionListRow(
+        title = kind,
+        startedText = startedText,
+        separator = stringResource(R.string.value_separator),
+        onClick = onOpen,
+        modifier = modifier,
+        status = SessionRowStatus.COMPLETED,
+        sizeText = sizeText,
+        contentDescription = listOf(kind, startedText, sizeText, chip).joinToString(", "),
+        // The waveform, the same mark the Signalling tab wears: a capture and a drive are one list, but
+        // they are not the same thing, and the badge is where that shows.
+        icon = FieldTapIcons.Pulse,
+        trailing = {
+            SignalQualityChip(
+                quality = if (capture.rejects > 0) SignalQuality.POOR else null,
+                label = chip,
+            )
+        },
+    )
 }
 
 /**
@@ -614,16 +775,6 @@ private fun SessionRow(
             }
         },
     )
-}
-
-/** "Today 6:19 PM", "Yesterday 9:12 AM", "Wed 6:02 PM", "Sep 9", or "Sep 9, 2025" from another year: one line of a row. */
-@Composable
-private fun startedWords(utcMs: Long, nowUtcMs: Long): String = when (DisplayTime.dayDistance(utcMs, nowUtcMs)) {
-    DayDistance.TODAY -> stringResource(R.string.sessions_when_today, DisplayTime.time(utcMs))
-    DayDistance.YESTERDAY -> stringResource(R.string.sessions_when_yesterday, DisplayTime.time(utcMs))
-    DayDistance.THIS_WEEK -> stringResource(R.string.sessions_when_weekday, DisplayTime.weekday(utcMs), DisplayTime.time(utcMs))
-    DayDistance.THIS_YEAR -> DisplayTime.monthDay(utcMs)
-    DayDistance.EARLIER -> DisplayTime.date(utcMs)
 }
 
 @Composable
@@ -875,8 +1026,47 @@ private fun HeadlineStats(meta: SessionMeta, signal: SignalSummary?, modifier: M
                 valueTone = SessionsPresentation.gapsTone(gaps),
             )
         }
+        if (signal != null && signal.trace.size >= MIN_TRACE_POINTS) {
+            SessionTraceCard(signal)
+        }
     }
 }
+
+/** Two points make a line; one makes a dot that says less than the median above it already does. */
+private const val MIN_TRACE_POINTS: Int = 2
+
+/**
+ * The session's RSRP against time, so a walk can be judged on the phone that recorded it. Until this,
+ * the only way to see where a session went bad was to pull it to a computer and run `fieldtap report`.
+ *
+ * The x axis is the session's own span, not a rolling window, and the points carry their real times, so
+ * a sampling gap is drawn as a gap rather than as a line through it.
+ */
+@Composable
+private fun SessionTraceCard(signal: SignalSummary, modifier: Modifier = Modifier) {
+    val points = signal.trace.map { ChartPoint(it.atMs, it.rsrpDbm) }
+    val spanMs = points.last().elapsedMs.coerceAtLeast(1)
+    val lowest = points.minOf { it.value }
+    val highest = points.maxOf { it.value }
+    SectionCard(
+        title = stringResource(R.string.detail_section_trace, ratName(signal.rat.rat)),
+        subtitle = stringResource(R.string.detail_trace_range, lowest, highest),
+        modifier = modifier,
+    ) {
+        TimeSeriesChart(
+            points = points,
+            nowElapsedMs = points.last().elapsedMs,
+            range = SignalScale.RSRP_DISPLAY_RANGE,
+            lineColor = FieldTapDesign.colors.chartRsrp,
+            windowMs = spanMs,
+            keyReference = FAIR_RSRP_DBM,
+            areaFill = true,
+        )
+    }
+}
+
+/** The -105 dBm line the report draws, and the one the "below" tile counts against. */
+private const val FAIR_RSRP_DBM: Int = -105
 
 /**
  * The three supporting stats under the hero, each at least [Sizes.TileCompactMinWidth]: one row in landscape or on a
@@ -1184,9 +1374,14 @@ private fun SessionsContentPreview() {
                     SessionSummary("20260908-101500_Test", null, started - 160_000_000, null, null, false, false, null, emptyList(), null, 12_000),
                 ),
                 storage = StorageStatus(usedBytes = 5_112_000, freeBytes = 38_000_000_000, policy = StoragePolicy()),
+                captures = listOf(
+                    SavedCapture("20260910-1120", started - 11_000_000, 7_100_000, 1_904, 169, 26),
+                    SavedCapture("20260909-2014", started - 80_000_000, 412_000, 88, 4, 0),
+                ),
             ),
             nowUtcMs = started + 3_600_000,
             onOpenSession = {},
+            onOpenCapture = {},
             onGoToLive = {},
             onRefresh = {},
         )
@@ -1201,6 +1396,7 @@ private fun SessionsEmptyPreview() {
             state = SessionsUiState(loading = false, sessions = emptyList(), storage = null),
             nowUtcMs = 1_789_050_600_000L,
             onOpenSession = {},
+            onOpenCapture = {},
             onGoToLive = {},
             onRefresh = {},
         )

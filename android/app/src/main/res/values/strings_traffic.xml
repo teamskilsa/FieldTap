@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Traffic tab (iperf3 and ping over cellular) and the Logs tab's record controls.
+-->
+<resources>
+    <!-- Traffic: the bearer. -->
+    <string name="traffic_cellular">Cellular</string>
+    <string name="traffic_no_data">No data</string>
+    <string name="traffic_no_bearer_title">No cellular data bearer</string>
+    <string name="traffic_no_bearer">The phone can be registered to the cell and still have no PDN. Traffic needs one — check the APN and the PDN setup on the callbox.</string>
+    <!-- Traffic: inputs. -->
+    <string name="traffic_server">Server</string>
+    <string name="traffic_host">IP address or host</string>
+    <string name="traffic_host_hint" translatable="false">192.168.10.1</string>
+    <string name="traffic_port">Port</string>
+    <string name="traffic_iperf" translatable="false">iPerf3</string>
+    <string name="traffic_iperf2" translatable="false">iPerf2</string>
+    <string name="traffic_ping">Ping</string>
+    <string name="traffic_download">Download</string>
+    <string name="traffic_upload">Upload</string>
+    <string name="traffic_duration">Duration</string>
+    <string name="traffic_streams">Streams</string>
+    <string name="traffic_bitrate">Bitrate</string>
+    <string name="traffic_echoes">Echoes</string>
+    <string name="traffic_mbps">Mbps</string>
+    <string name="traffic_ms">ms</string>
+    <!-- %1$d seconds, on a duration chip. -->
+    <string name="traffic_seconds">%1$d s</string>
+    <!-- Start and stop. %1$s is the host; %2$s is TCP or UDP. -->
+    <string name="traffic_start_ping">Ping %1$s</string>
+    <string name="traffic_start_ping_blank">Ping</string>
+    <string name="traffic_start_download">Start download · %1$s</string>
+    <string name="traffic_start_upload">Start upload · %1$s</string>
+    <string name="traffic_stop">Stop</string>
+    <!-- Live. -->
+    <string name="traffic_throughput">Throughput</string>
+    <string name="traffic_round_trip">Round trip</string>
+    <string name="traffic_lost">lost</string>
+    <!-- %1$d done of %2$d. -->
+    <string name="traffic_progress_seconds">%1$d / %2$d s</string>
+    <string name="traffic_progress">%1$d / %2$d</string>
+    <!-- Results. -->
+    <string name="traffic_result">Result</string>
+    <!-- %1$s Download or Upload, %2$s TCP or UDP, %3$d the stream count. -->
+    <plurals name="traffic_result_title">
+        <item quantity="one">%1$s · %2$s · %3$d stream</item>
+        <item quantity="other">%1$s · %2$s · %3$d streams</item>
+    </plurals>
+    <string name="traffic_mbps_average">Mbps average</string>
+    <string name="traffic_ms_average">ms average</string>
+    <string name="traffic_peak">Peak</string>
+    <string name="traffic_received">Received</string>
+    <string name="traffic_sent">Sent</string>
+    <string name="traffic_jitter">Jitter</string>
+    <string name="traffic_loss">Loss</string>
+    <string name="traffic_min">Min</string>
+    <string name="traffic_max">Max</string>
+    <string name="traffic_mdev" translatable="false">mdev</string>
+    <!-- %1$s is the host. -->
+    <string name="traffic_ping_to">Ping · %1$s</string>
+    <string name="traffic_did_not_run">Did not run</string>
+    <string name="traffic_history">History</string>
+    <string name="traffic_dl" translatable="false">DL</string>
+    <string name="traffic_ul" translatable="false">UL</string>
+    <!-- Why a run failed. %1$s is the host, %2$s the port. -->
+    <string name="traffic_error_busy">%1$s is already running a test for someone else. Try again when it finishes.</string>
+    <string name="traffic_error_refused">Nothing is listening on %1$s:%2$s. Is iperf3 -s running, and is the port open?</string>
+    <string name="traffic_error_refused_iperf2">Nothing is listening on %1$s:%2$s. Is iperf -s running there? iperf2 listens on 5001 unless told otherwise.</string>
+    <!-- %1$s is the server, %2$s the phone's own address on the bearer. -->
+    <string name="traffic_error_iperf2_no_reverse">%1$s accepted the download request but never sent. iperf2 servers older than 2.1 cannot send in reverse — upgrade it, or on the callbox run: iperf -c %2$s</string>
+    <string name="traffic_error_iperf2_no_report">The upload went out, but %1$s:%2$s never answered at the end, so there is no loss or jitter. Is iperf -s -u running on that port?</string>
+    <string name="traffic_error_no_route">No route to %1$s over cellular. Check the PDN\'s routing on the callbox.</string>
+    <string name="traffic_error_timeout">%1$s:%2$s did not answer.</string>
+    <string name="traffic_error_broke_off">The iperf3 server broke off the test.</string>
+    <string name="traffic_error_dns">Could not resolve %1$s on the cellular network.</string>
+    <string name="traffic_error_ping_not_permitted">This phone does not allow apps to send ping.</string>
+    <!-- %1$s is the failure in words. -->
+    <string name="traffic_error_ping">Ping failed: %1$s.</string>
+
+    <!-- Logs: the record controls. -->
+    <string name="logs_signal_title">Signal log</string>
+    <string name="logs_signal_detail">Serving cell, neighbours and GPS, every time the modem answers. No root needed.</string>
+    <!-- %1$s elapsed as mm:ss, %2$d samples. -->
+    <string name="logs_signal_running">%1$s  ·  %2$d samples</string>
+    <string name="logs_signal_start">Record signal</string>
+    <string name="logs_signal_stop">Stop signal log</string>
+    <string name="logs_signal_name">Signal log</string>
+    <string name="logs_rrc_title">RRC / NAS log</string>
+    <string name="logs_root" translatable="false">ROOT</string>
+    <string name="logs_rrc_detail">The call flow from the modem: attach, RRC, handover, and why the network says no.</string>
+    <string name="logs_rrc_start">Record RRC / NAS</string>
+    <string name="logs_rrc_stop">Stop and read</string>
+</resources>

@@ -16,14 +16,17 @@ The `fieldtap` tools in this repository validate those files and render them as 
 
 The app shows this statement word for word:
 
-> Reads what Android exposes: cell identity, RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests.
-> It does not decode RRC, NAS, SIB or any layer-3 signalling, cannot lock bands or cells, cannot scan operators, and
-> needs no root.
+> Reads what Android exposes: cell identity, RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping
+> and download tests. That needs no root, and it is all this app does until you turn on signalling
+> capture. Signalling capture reads RRC and NAS from the modem itself and needs a rooted phone; it is
+> off unless you switch it on. Neither mode can lock bands or cells or scan operators.
 
 What that means in practice:
 
-- **Not a signalling tool.** No RRC, NAS or SIB decoding, no procedures or call flows, no band or cell lock, no
-  operator scan, no root. Every session says so in `session.json` (`capabilities.layer3` is `false`).
+- **Two modes, and the default is the quiet one.** Without root the app reads only Android's public telephony
+  API: no RRC, NAS or SIB, no procedures or call flows, and `capabilities.layer3` is `false` in every session it
+  writes. Signalling capture is a separate, opt-in mode that needs a rooted phone; it reads RRC and NAS off the
+  modem through the handset's own diag path. Neither mode locks bands or cells or scans operators.
 - **Numbers are Android's, with their age.** Android decides how often the modem measures. A kpi row is written only for
   a fresh measurement, with its age and source; answers Android repeats from its cache are dropped and counted, and
   stretches without fresh samples are written as `sampling_gap` events. Live shows the cadence in force and how old each

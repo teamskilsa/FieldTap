@@ -109,7 +109,7 @@ def test_columns_json_matches_the_python_constants():
     assert on_disk["format"] == contract.FORMAT == "fieldtap-session/1"
     assert on_disk["files"] == contract.SESSION_FILES
     assert on_disk["upload_bundle"]["file_names"] == contract.SESSION_FILES
-    assert on_disk["traffic_tests"]["app"] == ["ping", "download"]
+    assert on_disk["traffic_tests"]["app"] == ["ping", "download", "upload"]
     assert on_disk["events"]["signalling_kinds"] == contract.SIGNALLING_EVENT_KINDS
     # everything else too, key order included
     assert json.dumps(on_disk, indent=2) == json.dumps(contract.schema(), indent=2), \

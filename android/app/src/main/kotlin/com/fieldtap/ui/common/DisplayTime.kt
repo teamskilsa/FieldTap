@@ -1,5 +1,8 @@
 package com.fieldtap.ui.common
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.fieldtap.R
 import com.fieldtap.ui.theme.Formats
 import java.time.Instant
 import java.time.ZoneId
@@ -104,4 +107,20 @@ object DisplayTime {
     /** A share with one decimal ("88.3"), or null when it is unknown or not a finite number. */
     fun percent(value: Double?, locale: Locale = Locale.getDefault()): String? =
         value?.takeIf { it.isFinite() }?.let { Formats.oneDecimal(it, locale) }
+}
+
+/**
+ * "Today 6:19 PM", "Yesterday 9:12 AM", "Wed 6:02 PM", "Sep 9", or "Sep 9, 2025" from another year: when
+ * something was recorded, on one line of a row or in a screen's title.
+ *
+ * It lives here rather than beside the drives list because a signalling capture is asked the same question,
+ * and a capture whose title read `20260915-130400` was answering a different one.
+ */
+@Composable
+fun startedWords(utcMs: Long, nowUtcMs: Long): String = when (DisplayTime.dayDistance(utcMs, nowUtcMs)) {
+    DayDistance.TODAY -> stringResource(R.string.sessions_when_today, DisplayTime.time(utcMs))
+    DayDistance.YESTERDAY -> stringResource(R.string.sessions_when_yesterday, DisplayTime.time(utcMs))
+    DayDistance.THIS_WEEK -> stringResource(R.string.sessions_when_weekday, DisplayTime.weekday(utcMs), DisplayTime.time(utcMs))
+    DayDistance.THIS_YEAR -> DisplayTime.monthDay(utcMs)
+    DayDistance.EARLIER -> DisplayTime.date(utcMs)
 }

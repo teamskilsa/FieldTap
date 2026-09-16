@@ -263,7 +263,7 @@ private fun PermissionRationalePreview() {
         )
         LimitsStatementCard(
             title = "What FieldTap reads",
-            statement = "Reads what Android exposes: cell identity, RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests. It does not decode RRC, NAS, SIB or any layer-3 signalling, cannot lock bands or cells, cannot scan operators, and needs no root.",
+            statement = "Reads what Android exposes: cell identity, RSRP/RSRQ/SINR, band, ARFCN, service state, plus ping and download tests. That needs no root, and it is all this app does until you turn on signalling capture. Signalling capture reads RRC and NAS from the modem itself and needs a rooted phone; it is off unless you switch it on. Neither mode can lock bands or cells or scan operators.",
         )
     }
 }

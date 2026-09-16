@@ -46,13 +46,15 @@ class LivePresentationTest {
     }
 
     @Test
-    fun walkModePromptsOnlyWhenWifiForcesTheLongInterval() {
+    fun theWifiPromptShowsOnlyWhileRecordingAndOnlyWhenWifiForcesTheLongInterval() {
         val wifiOnBattery = DeviceConditions(screenOn = true, charging = false, wifiConnected = true)
-        assertTrue(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = false, conditions = wifiOnBattery))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery.copy(charging = true)))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = wifiOnBattery.copy(wifiConnected = false)))
-        assertFalse(LivePresentation.showWalkModeWifiPrompt(walkMode = true, conditions = null))
+        assertTrue(LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery))
+        assertFalse("nothing is being recorded, so the cadence costs nothing",
+            LivePresentation.showWifiCadencePrompt(recording = false, conditions = wifiOnBattery))
+        assertFalse("charging restores the 2 s interval",
+            LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery.copy(charging = true)))
+        assertFalse(LivePresentation.showWifiCadencePrompt(recording = true, conditions = wifiOnBattery.copy(wifiConnected = false)))
+        assertFalse(LivePresentation.showWifiCadencePrompt(recording = true, conditions = null))
     }
 
     @Test
@@ -338,4 +340,45 @@ class LivePresentationTest {
 
     private fun signal(lteRsrp: Int? = null, nrSsRsrp: Int? = null, modemTimestampMs: Long?, observedElapsedMs: Long = 0) =
         SignalSnapshot(lteRsrp, null, null, nrSsRsrp, null, null, 3, modemTimestampMs, 0, observedElapsedMs)
+
+    private fun cell(pci: Int?, arfcn: Int? = 1850, rat: Rat = Rat.LTE, rsrp: Int? = -100) =
+        LiveCell(rat, pci, arfcn, 3, rsrp, -11, 9, "311480", "Verizon", 0, 1_000L)
+
+    @Test
+    fun aNeighbourReusingThePciModuloThirtyIsFlaggedWithItsMargin() {
+        val state = LiveState(
+            serving = cell(101, rsrp = -90).copy(connectionStatus = 1),
+            neighbours = listOf(cell(131, rsrp = -95)),
+        )
+        val rows = LivePresentation.neighbourRows(state)
+        assertEquals(1, rows.size)
+        assertEquals(setOf(3, 6, 30), rows[0].pciReuse)
+        assertEquals(5, rows[0].marginDb)
+    }
+
+    @Test
+    fun aNeighbourOnAnotherCarrierIsNotFlagged() {
+        val state = LiveState(
+            serving = cell(101, arfcn = 1850),
+            neighbours = listOf(cell(131, arfcn = 66_786)),
+        )
+        assertTrue(LivePresentation.neighbourRows(state).single().pciReuse.isEmpty())
+    }
+
+    @Test
+    fun withNoServingCellNothingIsFlagged() {
+        val state = LiveState(serving = null, neighbours = listOf(cell(131)))
+        val row = LivePresentation.neighbourRows(state).single()
+        assertTrue(row.pciReuse.isEmpty())
+        assertNull(row.marginDb)
+    }
+
+    @Test
+    fun neighbourRowsKeepTheOrderLiveDraws() {
+        val state = LiveState(
+            serving = cell(101),
+            neighbours = listOf(cell(104), cell(131), cell(200)),
+        )
+        assertEquals(listOf(104, 131, 200), LivePresentation.neighbourRows(state).map { it.cell.pci })
+    }
 }

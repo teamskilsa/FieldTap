@@ -303,12 +303,12 @@
     <string name="probe_capability_share_subject">5gto6G FieldTap capability</string>
 
     <!-- Settings. -->
-    <string name="settings_title">Settings</string>
-    <string name="settings_loading">Loading settings…</string>
-    <string name="settings_load_failed">Settings could not be read.</string>
-    <string name="settings_save_failed">Settings could not be saved. Try again.</string>
+    <string name="settings_title">Setup</string>
+    <string name="settings_loading">Loading…</string>
+    <string name="settings_load_failed">Could not be read.</string>
+    <string name="settings_save_failed">Could not be saved. Try again.</string>
     <string name="settings_section_tests">Ping and download tests</string>
-    <string name="settings_tests_network_note">Tests run on the mobile network only, never on Wi-Fi.</string>
+    <string name="settings_tests_network_note">On the mobile network only, never on Wi-Fi.</string>
     <string name="settings_tests_default">Run tests by default</string>
     <string name="settings_tests_default_supporting">You can still change this each time you start a session.</string>
     <!-- The row in Settings that opens the test targets, and that screen's title. -->
@@ -327,6 +327,13 @@
     <string name="settings_download_heading">Download</string>
     <string name="settings_download_url">HTTPS address</string>
     <string name="settings_download_url_supporting">Leave empty to turn the download off.</string>
+    <string name="probe_open_signalling">Capture signalling</string>
+    <string name="probe_signalling_blurb">With root, this phone can record RRC and NAS from its own modem. FieldTap shows the NAS messages and any reject cause; the rest is exported for Wireshark.</string>
+    <string name="settings_upload_heading">Upload</string>
+    <string name="settings_upload_url">HTTPS address</string>
+    <string name="settings_upload_url_supporting">Leave empty to keep uploads off. They spend mobile data in the slower, dearer direction, so they start off.</string>
+    <string name="settings_upload_interval">How often</string>
+    <string name="settings_upload_cap">Send at most</string>
     <!-- %1$s is a host name, e.g. speed.cloudflare.com. The address field's one helper line. -->
     <string name="settings_download_host">Downloads from %1$s. Leave empty to turn it off.</string>
     <string name="settings_download_off">The download test is off.</string>
@@ -356,15 +363,13 @@
     <string name="settings_section_measurement">Measurement</string>
     <string name="settings_measurement_note">Changes here apply at once.</string>
     <string name="settings_instant_updates">Instant cell updates</string>
-    <string name="settings_instant_updates_supporting">Lets Android push cell changes as they happen, on top of FieldTap’s regular requests. Needs the Phone permission; FieldTap never reads your number or SIM identifiers.</string>
+    <string name="settings_instant_updates_supporting">Android pushes cell changes the moment they happen. Needs the Phone permission; your number and SIM are never read.</string>
     <string name="settings_instant_updates_blocked">The Phone permission was refused. Allow it in app settings.</string>
     <string name="settings_instant_updates_needs_location">It also needs precise location.</string>
     <string name="settings_instant_updates_off_title">Turn off instant cell updates?</string>
-    <string name="settings_instant_updates_off_body">Android lets you remove the Phone permission only in FieldTap’s app settings. FieldTap keeps working without it.</string>
-    <string name="settings_walk_mode">Walk mode on by default</string>
-    <string name="settings_walk_mode_supporting">Starts the Live screen with walk mode on.</string>
+    <string name="settings_instant_updates_off_body">Only Android’s own app settings can remove the Phone permission. FieldTap works without it.</string>
     <string name="settings_section_zones">Privacy zones</string>
-    <string name="settings_zones_intro">In new sessions, logging pauses inside a zone: nothing is written there except that logging paused and resumed. Zone names stay on this phone.</string>
+    <string name="settings_zones_intro">Recording pauses inside a zone. Nothing is written there but the pause itself, and zone names never leave this phone.</string>
     <string name="settings_zones_empty">No privacy zones yet.</string>
     <string name="settings_zone_add_here">Add zone here</string>
     <string name="settings_zone_add_coordinates">Add by coordinates</string>
@@ -391,21 +396,23 @@
     <string name="settings_zone_fix">GPS position</string>
     <string name="settings_zone_save">Save</string>
     <string name="settings_section_consent">Consent</string>
-    <string name="settings_consent_note">Sessions start only after you accept the disclosure.</string>
+    <string name="settings_consent_note">Recording starts only after you accept the disclosure.</string>
     <!-- %1$s is a date. -->
     <string name="settings_consent_given">You accepted the disclosure on %1$s.</string>
-    <string name="settings_consent_outdated">You accepted an earlier version of the disclosure. Accept the current one before your next session.</string>
-    <string name="settings_consent_missing">Not given. New sessions cannot start until you accept the disclosure.</string>
+    <string name="settings_consent_outdated">You accepted an earlier version. Accept the current one before recording again.</string>
+    <string name="settings_consent_missing">Not given. Nothing can record until you accept it.</string>
     <string name="settings_consent_withdraw">Withdraw consent</string>
     <string name="settings_consent_withdraw_title">Withdraw consent?</string>
-    <string name="settings_consent_withdraw_body">New sessions cannot start until you accept again. A session recording now keeps running until you stop it, and sessions on this phone stay until you delete them.</string>
+    <string name="settings_consent_withdraw_body">Nothing new can start until you accept again. Anything recording now keeps running until you stop it, and what is on this phone stays until you delete it.</string>
     <string name="settings_consent_withdraw_confirm">Withdraw</string>
     <string name="settings_consent_withdrawn">Consent withdrawn</string>
 
     <!-- About & help section: rows that open the Readiness check and the About screen. -->
     <string name="settings_section_help">About &amp; help</string>
+    <string name="settings_probe">Capability probe</string>
+    <string name="settings_probe_supporting">What this phone can measure, and whether it can capture signalling.</string>
     <string name="settings_readiness">Readiness check</string>
-    <string name="settings_readiness_supporting">Check this phone is ready to record a walk.</string>
+    <string name="settings_readiness_supporting">Check this phone is ready to record a session.</string>
     <string name="settings_about">About 5gto6G FieldTap</string>
     <string name="settings_about_supporting">Version, account and what FieldTap reads.</string>
 

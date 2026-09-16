@@ -119,6 +119,7 @@ java {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":diag"))
     implementation(project(":format"))
 
     implementation(platform(libs.androidx.compose.bom))

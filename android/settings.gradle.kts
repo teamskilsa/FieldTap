@@ -23,6 +23,7 @@ dependencyResolutionManagement {
 rootProject.name = "fieldtap-android"
 
 // :format  plain Kotlin/JVM: the session files the Python report reads.
+// :diag    plain Kotlin/JVM: the Qualcomm diag protocol, so signalling decodes on the handset.
 // :core    plain Kotlin/JVM: platform-independent logic, unit-tested on any JDK.
 // :app     the Android application.
-include(":format", ":core", ":app")
+include(":format", ":diag", ":core", ":app")

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Signalling capture: the rooted-only screen that reads RRC and NAS off the modem.
+
+  Its own file on purpose. The session screens promise not to decode signalling and
+  SessionStringsTest enforces that by forbidding the wording in strings_session_ui.xml; the setup
+  screens have their own naming rule. This feature is neither, and hiding it inside either file
+  would either break a guard or weaken it.
+
+  The strings a capture contributes to the Recordings list live here too, for the same reason.
+-->
+<resources>
+    <!-- Signalling capture (rooted phones only). -->
+    <string name="signalling_title">Signalling</string>
+    <string name="signalling_export">Export the raw file</string>
+    <string name="signalling_export_subject">FieldTap signalling capture</string>
+    <string name="signalling_flow_title">Call flow</string>
+    <!-- %1$s the NAS messages shown, %2$s the records not decoded here (RRC). -->
+    <string name="signalling_flow_subtitle">%1$s · %2$s left for Wireshark</string>
+    <plurals name="signalling_messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="signalling_records">
+        <item quantity="one">%1$d record</item>
+        <item quantity="other">%1$d records</item>
+    </plurals>
+    <string name="signalling_uplink">phone → network</string>
+    <string name="signalling_downlink">network → phone</string>
+    <!-- %1$d is the 3GPP cause value, %2$s its name. -->
+    <string name="signalling_cause">Cause %1$d · %2$s</string>
+    <string name="signalling_reading">Reading…</string>
+    <string name="signalling_unreadable">This capture could not be read.</string>
+    <string name="signalling_quiet_title">No signalling in this one</string>
+    <string name="signalling_quiet_message">The modem recorded, but none of it was RRC or NAS. That is what a phone that is not attached to a network sounds like — check the service state on Live. The raw file is kept either way.</string>
+    <!-- %1$s is the file size. Shown when the capture holds no log records at all. -->
+    <string name="signalling_flow_nothing_read">%1$s recorded · no RRC or NAS in it</string>
+    <!-- How a capture names itself in the Recordings list, beside the drives. -->
+    <string name="recordings_capture_kind">Call flow</string>
+    <!-- %1$d messages the network refused. -->
+    <string name="recordings_capture_rejects">%1$d rejected</string>
+    <!-- %1$d messages seen. -->
+    <string name="recordings_capture_messages">%1$d messages</string>
+    <string name="recordings_capture_quiet">Quiet</string>
+</resources>

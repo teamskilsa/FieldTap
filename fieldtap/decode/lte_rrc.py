@@ -21,7 +21,15 @@ from .records import DecodedMessage
 HDR_A = Layout("A", "<BBBHHHBH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "earfcn", "sfn_subfn", "pdu_num", "length"))
 HDR_B = Layout("B", "<BBBHIHBH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "earfcn", "sfn_subfn", "pdu_num", "length"))
 HDR_C = Layout("C", "<BBBHIHBIH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "earfcn", "sfn_subfn", "pdu_num", "sib_mask", "length"))
-CANDIDATES = (HDR_A, HDR_B, HDR_C)
+# HDR_D: the NR-era layout, seen on a Snapdragon 8 Gen 1 (SM8450) running
+# MPSS.DE.2.0 and reporting packet version 27. It is HDR_C with three extra
+# bytes before the PCI. The first is a further release/version byte; the
+# next two are a 16-bit field whose meaning is not established (it read 0x0060
+# on every packet of the reference capture). Nothing in the decode depends on
+# either, but they must be consumed or PCI, EARFCN and pdu_num all shift.
+HDR_D = Layout("D", "<BBBHHIHBIH", ("rrc_rel", "rrc_ver", "nr_rrc_rel", "unknown_u16",
+                                    "pci", "earfcn", "sfn_subfn", "pdu_num", "sib_mask", "length"))
+CANDIDATES = (HDR_A, HDR_B, HDR_C, HDR_D)
 
 PDU_MAP_A = {1: "BCCH_BCH", 2: "BCCH_DL_SCH", 3: "MCCH", 4: "PCCH",
              5: "DL_CCCH", 6: "DL_DCCH", 7: "UL_CCCH", 8: "UL_DCCH"}
@@ -41,7 +49,12 @@ VERSION_TABLE = {
     8: (HDR_A, "A"), 13: (HDR_A, "A"), 22: (HDR_A, "A"),
     9: (HDR_B, "B"), 12: (HDR_B, "B"),
     14: (HDR_C, "C"), 15: (HDR_C, "C"), 16: (HDR_C, "C"),
-    19: (HDR_C, "D"), 26: (HDR_C, "D"), 27: (HDR_C, "D"),
+    19: (HDR_C, "D"), 26: (HDR_C, "D"),
+    # 27 verified against a live SM8450 capture (PCI 235, EARFCN 5110, band 12).
+    # 26 is left on HDR_C: the only v26 evidence is the synthetic corpus, and no
+    # handset has been seen emitting it. resolve_header probes anyway, so a real
+    # v26 device that uses the longer header still decodes.
+    27: (HDR_D, "D"),
 }
 
 
@@ -84,13 +97,14 @@ def decode(rec: LogRecord, info=None) -> Optional[DecodedMessage]:
             channel = channels.unknown_channel(f["pdu_num"])
     sfn, subfn = sfn_subfn_u16(f["sfn_subfn"])
     fields = {
-        "rrc_rel": f["rrc_rel"], "rrc_ver": f["rrc_ver"], "rb_id": f["rb_id"], "pci": f["pci"],
+        "rrc_rel": f["rrc_rel"], "rrc_ver": f["rrc_ver"], "pci": f["pci"],
         "earfcn": f["earfcn"], "sfn": sfn, "subfn": subfn, "pdu_num": f["pdu_num"],
         "length": f["length"], "layout": match.layout.name, "layout_source": match.source,
         "pdu_map": map_name,
     }
-    if "sib_mask" in f:
-        fields["sib_mask"] = f["sib_mask"]
+    for optional in ("rb_id", "nr_rrc_rel", "sib_mask"):
+        if optional in f:
+            fields[optional] = f[optional]
     return DecodedMessage(
         rat="lte", layer="rrc", channel=channel, direction=channel.direction,
         payload=bytes(payload), timestamp=rec.timestamp, log_code=rec.code,

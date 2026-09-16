@@ -4,6 +4,26 @@
 **Device under test:** OnePlus 10 Pro, model NE2215, `ro.product.device=OP516FL1`, SM8450 (`ro.board.platform=taro`), Android 15 / OxygenOS, bootloader unlocked (`orange`), rooted with Magisk (`u:r:magisk:s0`), SELinux Enforcing.
 **Live finding on device:** `/dev/diag` absent (ENOENT as root), no `/sys/class/diag*`, `grep -c diagchar /proc/devices` = 0.
 
+> **Superseded on 2026-09-14. The conclusion below is wrong.**
+>
+> This page concludes the OnePlus 10 Pro cannot do diag capture. Diag was
+> captured from this exact handset on 2026-09-14, and decoded: SIB1, SIB2-5,
+> SIB24 and two Paging records out of `0xB0C0`.
+>
+> Everything this page establishes about the *kernel* still holds. `/dev/diag`
+> really is absent, `diagchar` really is in no OxygenOS branch for this model,
+> and no Magisk module can conjure it back. The error is the inference drawn
+> from that: the page assumes `/dev/diag` and the diag USB interface are two
+> front ends onto one `diagchar` driver, so that killing the driver kills both.
+> On `taro` that is no longer true. Qualcomm moved diag into userspace --
+> `/vendor/bin/diag-router`, reaching the modem over QRTR and reaching USB over
+> FunctionFS -- and it runs on a stock phone. The backend was alive the whole
+> time; only a USB composition exposing it was missing, and root sets that.
+>
+> The corrected account, with what was run and what it returned, is in
+> [`../DEVICE-SETUP.md`](../DEVICE-SETUP.md). Keep this page for its kernel-source
+> work, not for its verdict.
+
 ## Methodology and confidence key
 
 This report combines three kinds of evidence, marked inline:

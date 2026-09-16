@@ -18,6 +18,7 @@ DIAG_VERNO_F = 0x00          # Version number request/response
 DIAG_ESN_F = 0x01            # Electronic serial number
 DIAG_STATUS_F = 0x0C
 DIAG_LOG_F = 0x10            # Asynchronous log packet (modem -> host)
+DIAG_MULTI_LOG_F = 0x98      # qmdl2 container holding one or more DIAG_LOG_F packets
 DIAG_BAD_CMD_F = 0x13        # Error responses
 DIAG_BAD_PARM_F = 0x14
 DIAG_BAD_LEN_F = 0x15
@@ -188,6 +189,45 @@ def build_log_entry(code: int, timestamp_raw: int, body: bytes) -> bytes:
     """A bare log entry (len, code, ts, body) as stored in QXDM .dlf files."""
     inner = LOG_ENTRY_HEADER_LEN + len(body)
     return struct.pack("<HHQ", inner, code, timestamp_raw) + body
+
+
+MULTI_LOG_HEADER = struct.Struct("<BBHI")   # cmd, version, pad, packet count
+MULTI_LOG_HEADER_LEN = MULTI_LOG_HEADER.size    # 8
+
+
+def iter_qmdl2_log_packets(frame: bytes):
+    """Yield each DIAG_LOG_F payload inside a qmdl2 container.
+
+    `diag_mdlog` on a diag-router platform does not write bare log packets. It
+    wraps them: 0x98, a version, two pad bytes and a 32-bit count, then that many
+    ordinary DIAG_LOG_F packets end to end. The packets inside are exactly what
+    the USB stream carries, so everything downstream is unchanged once the
+    wrapper is off.
+
+    The count is trusted only as far as the bytes allow, and each packet is
+    measured by its own length field rather than by the count, so a truncated
+    file yields what it holds instead of raising.
+    """
+    if len(frame) < MULTI_LOG_HEADER_LEN or frame[0] != DIAG_MULTI_LOG_F:
+        return
+    _cmd, _version, _pad, count = MULTI_LOG_HEADER.unpack_from(frame, 0)
+    offset = MULTI_LOG_HEADER_LEN
+    seen = 0
+    while offset + LOG_HEADER_LEN <= len(frame) and (count == 0 or seen < count):
+        if frame[offset] != DIAG_LOG_F:
+            return
+        inner_len = struct.unpack_from("<H", frame, offset + 4)[0]
+        if inner_len < LOG_ENTRY_HEADER_LEN:
+            return
+        # A packet spans its 16-byte header plus the body: inner_len counts the
+        # 12-byte entry header and the body, so the step is inner_len + 4.
+        step = inner_len + 4
+        end = offset + step
+        if end > len(frame):
+            end = len(frame)
+        yield frame[offset:end]
+        offset = end
+        seen += 1
 
 
 def iter_log_entries(data: bytes):

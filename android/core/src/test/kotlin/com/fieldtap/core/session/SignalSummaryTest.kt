@@ -18,7 +18,11 @@ class SignalSummaryTest {
         assertTrue("golden kpi.csv missing at ${GOLDEN_KPI.absolutePath}", GOLDEN_KPI.isFile)
 
         // Python's statistics.median over the golden rows: 54 LTE values, median -89.0, none below -105; 46 NR values.
-        assertEquals(SignalSummary(ServingRat.LTE, samples = 54, medianRsrpDbm = -89, belowFairPct = 0.0), SignalSummaries.read(GOLDEN_KPI))
+        val summary = SignalSummaries.read(GOLDEN_KPI)!!
+        assertEquals(
+            SignalSummary(ServingRat.LTE, samples = 54, medianRsrpDbm = -89, belowFairPct = 0.0),
+            summary.copy(trace = emptyList()),
+        )
     }
 
     @Test
@@ -75,7 +79,11 @@ class SignalSummaryTest {
             ),
         )
 
-        assertEquals(SignalSummary(ServingRat.LTE, samples = 1, medianRsrpDbm = -90, belowFairPct = 0.0), summary)
+        assertEquals(
+            SignalSummary(ServingRat.LTE, samples = 1, medianRsrpDbm = -90, belowFairPct = 0.0),
+            summary!!.copy(trace = emptyList()),
+        )
+        assertEquals("only the one usable row reaches the chart", 1, summary.trace.size)
     }
 
     @Test
@@ -108,5 +116,44 @@ class SignalSummaryTest {
         const val CRLF = "\r\n"
         const val HEADER = "frame,time_epoch,rat,meas_id,pci,rsrp_dbm,rsrq_db,sinr_db,comment,lat,lon"
         val GOLDEN_KPI = File("../../tests/fixtures/android_session/20260910-143000_Mall-walk-north-path/kpi.csv")
+    }
+
+    @Test
+    fun theGoldenSessionTraceIsOnePointPerLteSampleStartingAtZero() {
+        val trace = SignalSummaries.read(GOLDEN_KPI)!!.trace
+
+        assertEquals("one point per LTE sample, under the cap", 54, trace.size)
+        assertEquals("the first sample is the origin", 0L, trace.first().atMs)
+        assertTrue("time only moves forward", trace.zipWithNext().all { (a, b) -> b.atMs >= a.atMs })
+        assertTrue("every value is a plausible RSRP", trace.all { it.rsrpDbm in -156..-43 })
+    }
+
+    @Test
+    fun aTraceIsThinnedToTheCapKeepingItsEnds() {
+        val header = "frame,time_epoch,rat,meas_id,pci,rsrp_dbm,rsrq_db,sinr_db,comment,lat,lon"
+        val rows = (0 until SignalSummaries.TRACE_MAX * 3).map { i ->
+            ",%d.000,lte,,212,%d.0,,,,,".format(1_789_050_600L + i, -80 - (i % 20))
+        }
+        val summary = SignalSummaries.read(kpi(listOf(header) + rows))!!
+
+        assertEquals("every row is still a sample", SignalSummaries.TRACE_MAX * 3, summary.samples)
+        assertEquals("the chart is bounded", SignalSummaries.TRACE_MAX, summary.trace.size)
+        assertEquals(0L, summary.trace.first().atMs)
+        assertEquals("the last sample is kept", (rows.size - 1) * 1_000L, summary.trace.last().atMs)
+    }
+
+    @Test
+    fun aSamplingGapStaysAGapInTheTrace() {
+        val header = "frame,time_epoch,rat,meas_id,pci,rsrp_dbm,rsrq_db,sinr_db,comment,lat,lon"
+        val rows = listOf(
+            ",1789050600.000,lte,,212,-80.0,,,,,",
+            ",1789050602.000,lte,,212,-81.0,,,,,",
+            // 60 s later: the chart must show the hole rather than a line drawn through it.
+            ",1789050662.000,lte,,212,-95.0,,,,,",
+        )
+        val trace = SignalSummaries.read(kpi(listOf(header) + rows))!!.trace
+
+        assertEquals(listOf(0L, 2_000L, 62_000L), trace.map { it.atMs })
+        assertEquals(listOf(-80, -81, -95), trace.map { it.rsrpDbm })
     }
 }

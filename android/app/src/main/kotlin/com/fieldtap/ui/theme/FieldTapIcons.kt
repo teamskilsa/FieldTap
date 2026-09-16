@@ -166,7 +166,7 @@ object FieldTapIcons {
     /** The capability probe. */
     val Search: ImageVector by lazy { icon("Search", strokes = listOf(circle(10.5f, 10.5f, 6.5f), "M15.5 15.5L20.5 20.5")) }
 
-    /** Diagnostics: the activity/pulse waveform, for the Diagnostics tab. */
+    /** The activity/pulse waveform, for the Signalling tab. */
     val Pulse: ImageVector by lazy { icon("Pulse", strokes = listOf("M3 12H8L10.5 6L13.5 18L16 12H21")) }
 
     /** Walk mode. */

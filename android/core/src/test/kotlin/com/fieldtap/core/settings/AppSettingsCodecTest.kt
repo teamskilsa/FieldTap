@@ -33,7 +33,6 @@ class AppSettingsCodecTest {
             PrivacyZone(id = "b-id", label = "Office \"north\" \\ wing, café", lat = 51.5007292, lon = -0.1246254, radiusM = 150.0),
             PrivacyZone(id = "a-id", label = "Home", lat = -33.8567844, lon = 151.2152967, radiusM = 50.0),
         ),
-        walkModeDefault = true,
         testsDefaultOn = true,
         readinessLastRunUtcMs = 1_789_050_500_000L,
         lastSessionStartedUtcMs = 1_789_050_600_000L,
@@ -78,7 +77,7 @@ class AppSettingsCodecTest {
         val consent = "\"consent\": {\"version\": \"2026-09-10-draft\", \"sha256\": \"abc\", \"granted_utc_ms\": 5}"
         val ids = listOf("", "\"install_id\": null, ", "\"install_id\": \"  \", ", "\"install_id\": 42, ")
         for (id in ids) {
-            val text = "{" + id + consent + ", \"walk_mode_default\": true}"
+            val text = "{" + id + consent + "}"
             assertEquals(text, AppSettings(installId = "new-install-id"), AppSettingsCodec.decode(text, newId))
         }
     }
@@ -190,7 +189,7 @@ class AppSettingsCodecTest {
 
     @Test
     fun mistypedValuesFallBackToDefaults() {
-        val text = "{\"install_id\": \"abc\", \"walk_mode_default\": \"yes\", \"tests_default_on\": 1, " +
+        val text = "{\"install_id\": \"abc\", \"tests_default_on\": 1, " +
             "\"readiness_last_run_utc_ms\": \"123\", \"last_session_started_utc_ms\": true, " +
             "\"zones\": {\"id\": \"x\"}, \"consent\": \"granted\"}"
         assertEquals(AppSettings(installId = "abc"), decode(text))
@@ -215,7 +214,7 @@ class AppSettingsCodecTest {
         val root = Json.parseToJsonElement(AppSettingsCodec.encode(full)) as JsonObject
         assertEquals(
             setOf(
-                "settings_version", "install_id", "consent", "tests", "zones", "walk_mode_default",
+                "settings_version", "install_id", "consent", "tests", "zones",
                 "tests_default_on", "readiness_last_run_utc_ms", "last_session_started_utc_ms",
             ),
             root.keys,

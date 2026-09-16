@@ -73,15 +73,18 @@ fun SessionListRow(
     sizeText: String? = null,
     statusText: String? = null,
     contentDescription: String? = null,
+    /** Overrides the badge icon, for a row that is not a drive: a signalling capture's waveform. */
+    icon: ImageVector? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val colors = FieldTapDesign.colors
-    val (family: StatusColors, icon: ImageVector) = when (status) {
+    val (family: StatusColors, statusIcon: ImageVector) = when (status) {
         SessionRowStatus.COMPLETED -> colors.neutral to FieldTapIcons.File
         SessionRowStatus.RECORDING -> colors.recording to FieldTapIcons.Play
         SessionRowStatus.INTERRUPTED -> colors.warning to FieldTapIcons.Warning
         SessionRowStatus.UNREADABLE -> colors.error to FieldTapIcons.Error
     }
+    val badgeIcon = icon ?: statusIcon
     val showStatus = statusText != null && (status == SessionRowStatus.INTERRUPTED || status == SessionRowStatus.UNREADABLE)
     val secondary = buildAnnotatedString {
         append(listOfNotNull(startedText, durationText).joinToString(separator))
@@ -110,7 +113,7 @@ fun SessionListRow(
         ) {
             Surface(shape = CircleShape, color = family.container, contentColor = family.onContainer) {
                 Box(modifier = Modifier.size(Sizes.IconContainer), contentAlignment = Alignment.Center) {
-                    Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall + Spacing.Xxs))
+                    Icon(imageVector = badgeIcon, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall + Spacing.Xxs))
                 }
             }
             Column(

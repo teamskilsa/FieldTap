@@ -99,6 +99,7 @@ import com.fieldtap.core.live.AgeBadge
 import com.fieldtap.core.live.ChartPoint
 import com.fieldtap.core.live.LiveCell
 import com.fieldtap.core.live.LiveState
+import com.fieldtap.core.live.ServingVisit
 import com.fieldtap.core.live.LiveStateReducer
 import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.Consent
@@ -140,6 +141,7 @@ import com.fieldtap.ui.components.SignalDonutHero
 import com.fieldtap.ui.components.SignalHistoryChart
 import com.fieldtap.ui.components.SignalQualityLabels
 import com.fieldtap.ui.components.StatusBanner
+import com.fieldtap.ui.components.ViewSwitcher
 import com.fieldtap.ui.components.StatusChip
 import com.fieldtap.ui.components.TopBarAction
 import com.fieldtap.ui.components.TopBarToggleAction
@@ -176,7 +178,6 @@ import kotlinx.coroutines.launch
 data class LiveUiState(
     val live: LiveState,
     val status: SessionStatus,
-    val walkMode: Boolean,
     val testsDefaultOn: Boolean,
     /** The last refusal, until dismissed. */
     val refusal: StartRefusal?,
@@ -218,6 +219,12 @@ enum class LiveMessage {
     PAUSED_NO_FIX,
     START_FAILED,
     STOP_FAILED,
+
+    /**
+     * Recording started with advice outstanding: things that could cost samples but do not stop a
+     * session. The readiness check under Setup lists them.
+     */
+    STARTED_WITH_ADVICE,
 }
 
 /** A [LiveMessage] with an id, so the same message twice is shown twice. */
@@ -237,7 +244,6 @@ data class LiveMessageEvent(val id: Long, val message: LiveMessage)
  * Owner: workstream `ui-session`.
  */
 class LiveViewModel(private val graph: AppGraph) : ViewModel() {
-    private val walkModeChoice = MutableStateFlow<Boolean?>(null)
     private val refusal = MutableStateFlow<StartRefusal?>(null)
     private val prestart = MutableStateFlow<PrestartState>(PrestartState.None)
     private val message = MutableStateFlow<LiveMessageEvent?>(null)
@@ -249,14 +255,13 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         .catch { emit(null) }
 
     private val screenLocal: Flow<ScreenLocal> =
-        combine(walkModeChoice, refusal, prestart, message) { walk, refused, flow, event -> ScreenLocal(walk, refused, flow, event) }
+        combine(refusal, prestart, message) { refused, flow, event -> ScreenLocal(refused, flow, event) }
 
     val state: StateFlow<LiveUiState> =
         combine(graph.live.state, graph.sessionControl.status, storedSettings, screenLocal, graph.recovery.closed) { live, status, settings, local, recovered ->
             LiveUiState(
                 live = live,
                 status = status,
-                walkMode = local.walkModeChoice ?: settings?.walkModeDefault ?: false,
                 testsDefaultOn = settings?.testsDefaultOn ?: false,
                 refusal = local.refusal,
                 recovered = recovered,
@@ -270,7 +275,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
             initialValue = LiveUiState(
                 live = graph.live.state.value,
                 status = graph.sessionControl.status.value,
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = graph.recovery.closed.value,
@@ -301,11 +305,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
-    /** Turns walk mode on or off for this screen; until then it follows the Settings default. */
-    fun setWalkMode(on: Boolean) {
-        walkModeChoice.value = on
-    }
-
     /** Called from the Start dialog while the screen is visible. */
     fun start(request: StartRequest) {
         if (startJob?.isActive == true) return
@@ -326,8 +325,13 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
         startJob = viewModelScope.launch {
             prestart.value = PrestartState.Checking(normalized)
             val issues = findIssues(refusal = null)
-            if (issues.isEmpty()) {
+            // Only something that actually stops a session is worth a second screen. Advice -- battery
+            // optimisation, a vendor that kills background apps -- used to open the sheet too, so the
+            // common path was a form, a wall of caveats, and a button labelled "Start anyway" for a
+            // session nothing was wrong with. Advice now starts the session and says so afterwards.
+            if (issues.none { it.blocking }) {
                 begin(normalized)
+                if (issues.isNotEmpty()) post(LiveMessage.STARTED_WITH_ADVICE)
             } else {
                 prestart.value = PrestartState.Review(normalized, issues)
             }
@@ -465,7 +469,6 @@ class LiveViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     private data class ScreenLocal(
-        val walkModeChoice: Boolean?,
         val refusal: StartRefusal?,
         val prestart: PrestartState,
         val message: LiveMessageEvent?,
@@ -489,7 +492,7 @@ private suspend fun <T> attempt(block: suspend () -> T): T? = try {
  * The Live screen: serving tile (RAT, PCI, ARFCN, band, RSRP/RSRQ/SINR, PLMN) with its age badge; the
  * NSA NR leg; neighbours; the 5-minute RSRP and SINR chart; the cadence indicator ("2 s cadence" or
  * "10 s cadence", with the reason: screen off, Wi-Fi on while not charging); service, data and 5G icon
- * state; GPS state; the walk-mode toggle; Start (with name, note, place and tests opt-in), Mark (with a
+ * state; GPS state; Start (with name, note, place and tests opt-in), Mark (with a
  * note) and Stop; a line when a listener was refused ("Phone permission not granted: no push updates").
  * With the screen off on battery, signal-strength fill stops, and pocket mode says so.
  * Language never implies decoding or signalling.
@@ -510,7 +513,7 @@ fun LiveScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.recheckReadiness() }
-    WalkModeEffect(enabled = state.walkMode)
+    KeepScreenOnEffect(enabled = state.status !is SessionStatus.Idle)
     val actions = LiveActions(
         onStart = viewModel::start,
         onStartAnyway = viewModel::startAnyway,
@@ -518,7 +521,6 @@ fun LiveScreen(
         onRecheck = viewModel::recheckReadiness,
         onMark = viewModel::mark,
         onStop = viewModel::stop,
-        onWalkModeChange = viewModel::setWalkMode,
         onDismissRefusal = viewModel::dismissRefusal,
         onAcknowledgeRecovered = viewModel::acknowledgeRecovered,
         onConsumeMessage = viewModel::consumeMessage,
@@ -528,8 +530,7 @@ fun LiveScreen(
         onOpenSession = onOpenSession,
         nowWallMs = viewModel::nowWallMs,
     )
-    // Walk mode forces the dark surface; otherwise this follows the system like the activity's theme.
-    FieldTapTheme(darkTheme = state.walkMode || isSystemInDarkTheme()) {
+    FieldTapTheme {
         LiveContent(state = state, actions = actions, modifier = modifier)
     }
 }
@@ -554,6 +555,7 @@ fun SignalChart(
     modifier: Modifier = Modifier,
     gapThresholdMs: Long = ChartMath.DEFAULT_GAP_THRESHOLD_MS,
     compact: Boolean = false,
+    showSinr: Boolean = true,
 ) {
     val windowMs = LiveStateReducer.WINDOW_MS
     val rsrpStats = ChartMath.stats(rsrp, nowElapsedMs, windowMs)
@@ -584,7 +586,7 @@ fun SignalChart(
             notReported = stringResource(R.string.chart_not_reported),
             window = stringResource(R.string.chart_window),
         ),
-        summary = "$rsrpSummary $sinrSummary",
+        summary = if (showSinr) "$rsrpSummary $sinrSummary" else rsrpSummary,
         modifier = modifier,
         windowMs = windowMs,
         gapThresholdMs = gapThresholdMs,
@@ -597,24 +599,28 @@ fun SignalChart(
             else -> Sizes.ChartPanelHeight
         },
         sinrPanelHeight = if (compact) Sizes.ChartPanelCompactHeight else Sizes.ChartPanelHeight,
+        showSinr = showSinr,
     )
 }
 
 /**
- * Walk mode: while [enabled], keeps the screen on (`FLAG_KEEP_SCREEN_ON`) with a dark surface, and prompts to turn
- * Wi-Fi off or plug in so Android's 2 s interval applies. Clears the flag on dispose. No wake lock.
+ * Keeps the screen on (`FLAG_KEEP_SCREEN_ON`) while a session is recording, and clears the flag on
+ * dispose. No wake lock.
  *
- * It never sets the window brightness. A window brightness overrides adaptive brightness and the user's own slider,
- * so a fixed low level would leave the numbers unreadable in daylight, where walks happen; the dark surface is what
- * saves power on a screen that stays on.
+ * This is not a preference. Android refreshes cell information every 2 s only while the display is
+ * on, and every 10 s once it sleeps, so a session whose screen slept would quietly record a quarter
+ * of the samples it reported being able to take. The flag is held for exactly as long as the
+ * recording, and never outside one.
  *
- * This effect owns the window flag; the dark surface and the Wi-Fi prompt are drawn by [LiveScreen]. Outside an
- * activity (previews) it does nothing.
+ * It never sets the window brightness: a window brightness overrides adaptive brightness and the
+ * user's own slider, which would leave the numbers unreadable in daylight, where drive tests happen.
+ *
+ * Outside an activity (previews) it does nothing.
  *
  * Owner: workstream `ui-session`.
  */
 @Composable
-fun WalkModeEffect(enabled: Boolean) {
+fun KeepScreenOnEffect(enabled: Boolean) {
     val activity = LocalActivity.current
     DisposableEffect(activity, enabled) {
         val window = activity?.window
@@ -634,6 +640,26 @@ private const val MAX_TEXT_LENGTH: Int = 120
 private const val UNKNOWN_VALUE: String = "—"
 
 /** Everything the Live content can ask for, so the stateless content can be previewed. */
+/**
+ * Which view of the serving cell the phone layout shows, in switcher order.
+ *
+ * Live knows nine cards' worth about the cell. All nine in one scroll was the app's own filing order, not
+ * anybody's reading order: three named views put the glanceable half first and leave the rest one tap away
+ * rather than nine scrolls down.
+ *
+ * Owner: workstream `ui-session`.
+ */
+enum class LiveView(@StringRes val label: Int) {
+    /** What you look at while walking: the serving tiles, the trend, the state chips. */
+    SIGNAL(R.string.live_view_signal),
+
+    /** Which cell this is, which cells it has been, and how often it is being sampled. */
+    CELL(R.string.live_view_cell),
+
+    /** Everything else the phone can see from here, and the carriers aggregated with the serving cell. */
+    NEIGHBOURS(R.string.live_view_neighbours),
+}
+
 private data class LiveActions(
     val onStart: (StartRequest) -> Unit,
     val onStartAnyway: () -> Unit,
@@ -641,7 +667,6 @@ private data class LiveActions(
     val onRecheck: () -> Unit,
     val onMark: (String?) -> Unit,
     val onStop: () -> Unit,
-    val onWalkModeChange: (Boolean) -> Unit,
     val onDismissRefusal: () -> Unit,
     val onAcknowledgeRecovered: (String) -> Unit,
     val onConsumeMessage: (Long) -> Unit,
@@ -659,7 +684,9 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     var startDialogOpen by rememberSaveable { mutableStateOf(false) }
     var markDialogOpen by rememberSaveable { mutableStateOf(false) }
     var stopDialogOpen by rememberSaveable { mutableStateOf(false) }
-    var walkModeDetailsOpen by rememberSaveable { mutableStateOf(false) }
+    // Which view of the cell the phone layout is showing. Saved, so it survives rotation and process death:
+    // someone watching neighbours who turns the phone should still be watching neighbours.
+    var view by rememberSaveable { mutableStateOf(LiveView.SIGNAL) }
     val buttonState = LivePresentation.buttonState(state.status, state.prestart)
 
     val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -691,7 +718,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
     }
 
     val liveTitle = stringResource(R.string.live_title)
-    val openWalkModeDetails = { walkModeDetailsOpen = true }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -718,7 +744,7 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                         FieldTapTopBar(
                             scroll = topBarScroll,
                             title = liveTitle,
-                            actions = { LiveBarActions(state, actions, openWalkModeDetails) },
+                            actions = { LiveBarActions() },
                         )
                     }
                     // Pinned under the bar while a session runs: whether it is collecting stays in view however far the list scrolls.
@@ -743,6 +769,8 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                 state = state,
                 actions = actions,
                 requestPreciseLocation = requestPreciseLocation,
+                view = view,
+                onSelectView = { view = it },
                 modifier = Modifier.padding(padding),
                 actionsBeside = if (actionsBeside) {
                     {
@@ -753,7 +781,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
                             onStart = { startDialogOpen = true },
                             onStop = { stopDialogOpen = true },
                             onMark = { markDialogOpen = true },
-                            onWalkModeDetails = openWalkModeDetails,
                         )
                     }
                 } else {
@@ -768,7 +795,6 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
         StartSessionDialog(
             tests = state.tests,
             testsDefaultOn = state.testsDefaultOn,
-            walkMode = state.walkMode,
             nowWallMs = actions.nowWallMs,
             fullScreen = LivePresentation.actionsBesideContent(window.width, window.height),
             onDismiss = { startDialogOpen = false },
@@ -796,58 +822,16 @@ private fun LiveContent(state: LiveUiState, actions: LiveActions, modifier: Modi
             },
         )
     }
-    if (walkModeDetailsOpen) {
-        AlertDialog(
-            onDismissRequest = { walkModeDetailsOpen = false },
-            confirmButton = {
-                TextButton(onClick = { walkModeDetailsOpen = false }) {
-                    Text(text = stringResource(R.string.live_walk_mode_details_close))
-                }
-            },
-            icon = { Icon(imageVector = FieldTapIcons.Walk, contentDescription = null) },
-            title = { Text(text = stringResource(R.string.live_walk_mode)) },
-            text = { Text(text = stringResource(R.string.live_walk_mode_details)) },
-        )
-    }
     val review = state.prestart as? PrestartState.Review
     if (review != null) {
         PrestartSheet(review = review, actions = actions, requestPreciseLocation = requestPreciseLocation)
     }
 }
 
-/**
- * Walk mode as an on-off icon and a small overflow with "How walk mode works": in the top bar upright, at the top of the
- * action rail in landscape. Sessions, Diagnostics, Settings and About are reached from the bottom tab bar now, so the top
- * bar keeps only Live's own controls. Walk mode sat in a card above the trend, where its explanation took the trend's place.
- */
 @Composable
-private fun LiveBarActions(state: LiveUiState, actions: LiveActions, onWalkModeDetails: () -> Unit) {
-    TopBarToggleAction(
-        icon = FieldTapIcons.Walk,
-        contentDescription = stringResource(R.string.live_walk_mode),
-        checked = state.walkMode,
-        onCheckedChange = actions.onWalkModeChange,
-        stateDescription = stringResource(if (state.walkMode) R.string.live_walk_mode_on else R.string.live_walk_mode_off),
-    )
-    LiveOverflowMenu(onWalkModeDetails)
-}
-
-@Composable
-private fun LiveOverflowMenu(onWalkModeDetails: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        TopBarAction(
-            icon = FieldTapIcons.MoreVert,
-            contentDescription = stringResource(R.string.live_action_more),
-            onClick = { expanded = true },
-        )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            OverflowItem(R.string.live_walk_mode_details_action, FieldTapIcons.Walk) {
-                expanded = false
-                onWalkModeDetails()
-            }
-        }
-    }
+private fun LiveBarActions() {
+    // Sessions, Diagnostics, Settings and About are reached from the bottom tab bar; Live has no
+    // controls of its own in the bar since walk mode went.
 }
 
 @Composable
@@ -875,10 +859,12 @@ private class LiveParts(
 )
 
 /**
- * Upright on a phone: the serving cell (its RSRQ and SINR in one row, or one line in the hero when the cell reports
- * neither), then the cadence, service, data, 5G and GPS chips, then the 5-minute trend, so what an engineer glances at
- * while walking is on the first screen at font scale 1.0 on a Pixel 7, as ScreenTourTest asserts; the cadence details,
- * the cell details and neighbours follow. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) two panes: the
+ * Upright on a phone: any banner, then a [ViewSwitcher] over three views of the same cell — Signal (the serving
+ * tiles, the 5-minute trend, the cadence/service/data/5G/GPS chips), Cell (its details, the cells it has sat on,
+ * the cadence detail) and Neighbours. Nine cards in one scroll was everything the app knows stacked in the order
+ * it was written; what an engineer glances at while walking is the first view, on the first screen at font scale
+ * 1.0 on a Pixel 7, as ScreenTourTest asserts. From [Sizes.WideLayoutMinWidth] (landscape phones, tablets) there is
+ * room for all of it at once, so the wide layout keeps both panes and shows no switcher: two panes, the
  * serving cell and its details on one side, the trend first on the other, then the chips and cadence details.
  * [actionsBeside], in a short wide window, is the rail at the end: the bar's actions at its top, the session buttons at
  * its bottom.
@@ -888,6 +874,8 @@ private fun LiveList(
     state: LiveUiState,
     actions: LiveActions,
     requestPreciseLocation: () -> Unit,
+    view: LiveView,
+    onSelectView: (LiveView) -> Unit,
     modifier: Modifier = Modifier,
     actionsBeside: (@Composable () -> Unit)? = null,
 ) {
@@ -926,6 +914,7 @@ private fun LiveList(
                     servingTilesItem(parts)
                     servingCardItem(parts)
                     neighboursItem(parts)
+                    servingHistoryItem(parts)
                 }
                 LazyColumn(
                     modifier = Modifier
@@ -951,14 +940,37 @@ private fun LiveList(
                     verticalArrangement = Arrangement.spacedBy(Spacing.SectionGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // Banners sit above the switcher: they are why the screen is not showing what it should,
+                    // and hiding one behind an unchosen view would be hiding the answer.
                     bannerItems(parts)
-                    servingTilesItem(parts)
-                    statusChipsItem(parts)
-                    chartItem(parts)
-                    cadenceDetailsItem(parts)
-                    servingCardItem(parts)
-                    neighboursItem(parts)
-                    limitsItem(parts)
+                    item(key = "view-switcher") {
+                        ViewSwitcher(
+                            options = LiveView.entries,
+                            selected = view,
+                            label = { stringResource(it.label) },
+                            onSelect = onSelectView,
+                            modifier = Modifier.contentWidth(),
+                        )
+                    }
+                    when (view) {
+                        LiveView.SIGNAL -> {
+                            servingTilesItem(parts)
+                            chartItem(parts)
+                            statusChipsItem(parts)
+                            limitsItem(parts)
+                        }
+
+                        LiveView.CELL -> {
+                            servingCardItem(parts)
+                            servingHistoryItem(parts)
+                            cadenceDetailsItem(parts)
+                            // With no serving cell the Cell view would be sampling figures and nothing
+                            // else, which answers a question nobody asked. This says why it is empty.
+                            limitsItem(parts)
+                        }
+
+                        LiveView.NEIGHBOURS -> neighboursItem(parts)
+                    }
                 }
                 if (actionsBeside != null) ActionColumn(actionsBeside, modifier = Modifier.padding(end = gutter))
             }
@@ -1062,10 +1074,10 @@ private fun LazyListScope.bannerItems(parts: LiveParts) {
             )
         }
     }
-    if (LivePresentation.showWalkModeWifiPrompt(state.walkMode, state.live.conditions)) {
-        item(key = "walk-wifi") {
+    if (LivePresentation.showWifiCadencePrompt(state.status !is SessionStatus.Idle, state.live.conditions)) {
+        item(key = "wifi-cadence") {
             StatusBanner(
-                message = stringResource(R.string.live_walk_wifi_prompt),
+                message = stringResource(R.string.live_wifi_cadence_prompt),
                 tone = StatusTone.WARNING,
                 icon = FieldTapIcons.Wifi,
                 actionLabel = stringResource(R.string.live_action_wifi_settings),
@@ -1118,9 +1130,24 @@ private fun LazyListScope.chartItem(parts: LiveParts) {
     }
 }
 
+private fun LazyListScope.servingHistoryItem(parts: LiveParts) {
+    if (parts.state.live.servingHistory.size < 2) return
+    item(key = "serving-history") {
+        ServingHistoryCard(
+            history = parts.state.live.servingHistory,
+            labels = parts.labels,
+            modifier = Modifier.contentWidth(),
+        )
+    }
+}
+
 private fun LazyListScope.neighboursItem(parts: LiveParts) {
     item(key = "neighbours") {
-        NeighboursCard(neighbours = parts.state.live.neighbours, labels = parts.labels, modifier = Modifier.contentWidth())
+        NeighboursCard(
+            neighbours = LivePresentation.neighbourRows(parts.state.live),
+            labels = parts.labels,
+            modifier = Modifier.contentWidth(),
+        )
     }
 }
 
@@ -1209,7 +1236,10 @@ private fun ServingTiles(live: LiveState, labels: SignalQualityLabels, modifier:
                             text = line,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
+                            // A cell's identity is short and clamps safely. With no cell this is the
+                            // sentence explaining why there is none, and cutting it mid-word leaves
+                            // the reader with the problem and not the reason.
+                            maxLines = if (serving == null) Int.MAX_VALUE else 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -1311,6 +1341,21 @@ private fun ServingCard(live: LiveState, labels: SignalQualityLabels, modifier: 
                 quality = quality,
                 qualityLabel = labels.of(quality),
                 supportingText = cellIdentity(leg),
+                placeholder = UNKNOWN_VALUE,
+            )
+        }
+        // Carriers this phone is aggregating. They belong beside the serving cell because they are
+        // being used; the neighbour list is for cells we are not on.
+        live.aggregatedLegs.forEach { aggregated ->
+            val quality = SignalScale.quality(SignalMetric.RSRP, aggregated.rsrp)
+            SectionDivider()
+            CellSignalRow(
+                title = stringResource(R.string.live_aggregated_leg),
+                valueText = aggregated.rsrp?.toString(),
+                unit = stringResource(R.string.unit_dbm),
+                quality = quality,
+                qualityLabel = labels.of(quality),
+                supportingText = cellIdentity(aggregated),
                 placeholder = UNKNOWN_VALUE,
             )
         }
@@ -1444,8 +1489,42 @@ private fun StatusChips(live: LiveState, modifier: Modifier = Modifier) {
 private fun calmChipTone(tone: StatusTone): StatusTone =
     if (tone == StatusTone.WARNING || tone == StatusTone.ERROR) tone else StatusTone.NEUTRAL
 
+/**
+ * The serving cells this phone has used while Live has been watching, newest first. Drawn only once
+ * there are two: a history of one cell is the serving card again, and says nothing about reselection.
+ */
 @Composable
-private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
+private fun ServingHistoryCard(history: List<ServingVisit>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
+    if (history.size < 2) return
+    SectionCard(
+        title = stringResource(R.string.live_section_serving_history),
+        subtitle = pluralStringResource(R.plurals.live_serving_history_count, history.size, history.size),
+        modifier = modifier,
+    ) {
+        history.forEachIndexed { index, visit ->
+            if (index > 0) SectionDivider()
+            val cell = visit.cell
+            val quality = SignalScale.quality(SignalMetric.RSRP, cell.rsrp)
+            val held = if (index == 0) {
+                stringResource(R.string.live_history_serving_now)
+            } else {
+                stringResource(R.string.live_history_held, Formats.elapsed(visit.untilMs - visit.sinceMs))
+            }
+            CellSignalRow(
+                title = neighbourTitle(cell),
+                valueText = cell.rsrp?.toString(),
+                unit = stringResource(R.string.unit_dbm),
+                quality = quality,
+                qualityLabel = labels.of(quality),
+                supportingText = listOf(ratName(cell.rat), held).joinToString(stringResource(R.string.value_separator)),
+                placeholder = UNKNOWN_VALUE,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NeighboursCard(neighbours: List<NeighbourRow>, labels: SignalQualityLabels, modifier: Modifier = Modifier) {
     SectionCard(
         title = stringResource(R.string.live_section_neighbours),
         subtitle = if (neighbours.isEmpty()) null else pluralStringResource(R.plurals.live_neighbours_count, neighbours.size, neighbours.size),
@@ -1458,8 +1537,9 @@ private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabe
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            neighbours.forEachIndexed { index, cell ->
+            neighbours.forEachIndexed { index, row ->
                 if (index > 0) SectionDivider()
+                val cell = row.cell
                 val quality = SignalScale.quality(SignalMetric.RSRP, cell.rsrp)
                 CellSignalRow(
                     title = neighbourTitle(cell),
@@ -1467,7 +1547,7 @@ private fun NeighboursCard(neighbours: List<LiveCell>, labels: SignalQualityLabe
                     unit = stringResource(R.string.unit_dbm),
                     quality = quality,
                     qualityLabel = labels.of(quality),
-                    supportingText = neighbourSupporting(cell),
+                    supportingText = neighbourSupporting(row),
                     placeholder = UNKNOWN_VALUE,
                 )
             }
@@ -1495,7 +1575,7 @@ private fun LiveActionBar(
 }
 
 /**
- * The rail beside the content in a short, wide window: walk mode, Sessions and the menu at its top, where the top bar would
+ * The rail beside the content in a short, wide window: Live's bar actions at its top, where the top bar would
  * have held them, and the session buttons at its bottom, the Start button's label on one line under its icon.
  */
 @Composable
@@ -1506,12 +1586,11 @@ private fun LiveActionRail(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onMark: () -> Unit,
-    onWalkModeDetails: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                LiveBarActions(state, actions, onWalkModeDetails)
+                LiveBarActions()
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.Sm)) {
@@ -1589,7 +1668,6 @@ private fun LiveMarkButton(state: LiveUiState, onMark: () -> Unit, modifier: Mod
 private fun StartSessionDialog(
     tests: TestSettings?,
     testsDefaultOn: Boolean,
-    walkMode: Boolean,
     nowWallMs: () -> Long,
     fullScreen: Boolean,
     onDismiss: () -> Unit,
@@ -1609,7 +1687,6 @@ private fun StartSessionDialog(
                 note = note.trim().ifEmpty { null },
                 location = place.trim().ifEmpty { null },
                 testsEnabled = testsEnabled,
-                walkMode = walkMode,
             ),
         )
     }
@@ -1828,6 +1905,34 @@ private fun StopDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     )
 }
 
+/**
+ * The pre-start sheet for a recording started somewhere other than the old Live screen — the Logs tab.
+ * The same checks, the same fixes and the same "Start anyway"; only who asked is different.
+ */
+@Composable
+internal fun PrestartReview(review: PrestartState.Review, viewModel: LiveViewModel, requestPreciseLocation: () -> Unit) {
+    PrestartSheet(
+        review = review,
+        actions = LiveActions(
+            onStart = viewModel::start,
+            onStartAnyway = viewModel::startAnyway,
+            onDismissPrestart = viewModel::dismissPrestart,
+            onRecheck = viewModel::recheckReadiness,
+            onMark = viewModel::mark,
+            onStop = viewModel::stop,
+            onDismissRefusal = viewModel::dismissRefusal,
+            onAcknowledgeRecovered = viewModel::acknowledgeRecovered,
+            onConsumeMessage = viewModel::consumeMessage,
+            onOpenSessions = {},
+            onOpenReadiness = {},
+            onOpenDisclosure = {},
+            onOpenSession = {},
+            nowWallMs = viewModel::nowWallMs,
+        ),
+        requestPreciseLocation = requestPreciseLocation,
+    )
+}
+
 @Composable
 private fun PrestartSheet(review: PrestartState.Review, actions: LiveActions, requestPreciseLocation: () -> Unit) {
     val context = LocalContext.current
@@ -2039,6 +2144,7 @@ private fun liveMessageText(message: LiveMessage): String = stringResource(
         LiveMessage.PAUSED_NO_FIX -> R.string.live_message_paused_no_fix
         LiveMessage.START_FAILED -> R.string.live_message_start_failed
         LiveMessage.STOP_FAILED -> R.string.live_message_stop_failed
+        LiveMessage.STARTED_WITH_ADVICE -> R.string.live_message_started_with_advice
     },
 )
 
@@ -2219,11 +2325,24 @@ private fun neighbourTitle(cell: LiveCell): String {
     return if (parts.isEmpty()) ratName(cell.rat) else parts.joinToString(stringResource(R.string.value_separator))
 }
 
-/** "LTE · band 3". */
+/** "LTE · band 3 · reuses PCI mod 3, 6 · 5 dB below serving". */
 @Composable
-private fun neighbourSupporting(cell: LiveCell): String {
+private fun neighbourSupporting(row: NeighbourRow): String {
+    val cell = row.cell
     val parts = mutableListOf(ratName(cell.rat))
     cell.band?.let { parts += stringResource(if (cell.rat == Rat.NR) R.string.live_band_nr else R.string.live_band_lte, it) }
+    if (row.pciReuse.isNotEmpty()) {
+        val moduli = row.pciReuse.sorted().joinToString(stringResource(R.string.live_pci_reuse_separator))
+        parts += stringResource(R.string.live_pci_reuse, moduli)
+        // The margin earns its place only beside a reuse: it is what says whether the reuse matters.
+        row.marginDb?.let { margin ->
+            parts += when {
+                margin > 0 -> stringResource(R.string.live_margin_below, margin)
+                margin < 0 -> stringResource(R.string.live_margin_above, -margin)
+                else -> stringResource(R.string.live_margin_level)
+            }
+        }
+    }
     return parts.joinToString(stringResource(R.string.value_separator))
 }
 
@@ -2261,7 +2380,7 @@ private fun LiveContentRecordingPreview() {
                 ),
                 status = SessionStatus.Recording(
                     RecorderSnapshot(
-                        dirName = "20260910-143000_Walk-14-30",
+                        dirName = "20260910-143000_Session-14-30",
                         startedUtcMs = 1_789_050_600_000L,
                         elapsedMs = 754_000,
                         servingRat = ServingRat.LTE,
@@ -2276,7 +2395,6 @@ private fun LiveContentRecordingPreview() {
                         stopping = false,
                     ),
                 ),
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = emptyList(),
@@ -2294,7 +2412,6 @@ private fun LiveContentWaitingPreview() {
             state = LiveUiState(
                 live = LiveState(),
                 status = SessionStatus.Idle,
-                walkMode = false,
                 testsDefaultOn = false,
                 refusal = null,
                 recovered = listOf(SessionOutcome("20260909-180200_Car-park", 1_789_000_000_000L, 1_789_000_370_000L, "low_memory", true, 180)),
@@ -2311,7 +2428,6 @@ private val PreviewActions = LiveActions(
     onRecheck = {},
     onMark = {},
     onStop = {},
-    onWalkModeChange = {},
     onDismissRefusal = {},
     onAcknowledgeRecovered = {},
     onConsumeMessage = {},

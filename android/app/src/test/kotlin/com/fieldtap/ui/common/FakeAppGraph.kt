@@ -228,12 +228,10 @@ object TestData {
 
     fun settings(
         consent: Boolean = true,
-        walkModeDefault: Boolean = false,
         testsDefaultOn: Boolean = false,
     ): AppSettings = AppSettings(
         installId = "7b0f6c1e-2a4d-4f0e-9a51-0c3f5d2e8b17",
         consent = if (consent) Consent.record(STARTED_UTC_MS - 86_400_000) else null,
-        walkModeDefault = walkModeDefault,
         testsDefaultOn = testsDefaultOn,
     )
 

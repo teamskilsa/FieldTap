@@ -62,7 +62,9 @@ internal fun SetupScreenScaffold(
                     scroll = topBarScroll,
                     title = title,
                     onNavigateUp = onBack,
-                    navigateUpContentDescription = if (onBack != null) backDescription else null,
+                    // The setup screens keep their own "Back", so the setup wording rule covers every
+                    // string they show rather than most of them.
+                    navigateUpContentDescription = backDescription,
                     actions = actions,
                 )
             }
