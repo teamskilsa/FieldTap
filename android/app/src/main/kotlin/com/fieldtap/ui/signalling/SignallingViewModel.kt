@@ -8,6 +8,7 @@ import com.fieldtap.diag.SignallingEntry
 import com.fieldtap.diag.SignallingReader
 import com.fieldtap.platform.diag.DiagCaptureResult
 import com.fieldtap.platform.diag.HandsetDiagCapture
+import com.fieldtap.platform.diag.RootShell
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +99,17 @@ class SignallingViewModel(
                     )
                 }
 
-                DiagCaptureResult.NoRoot -> fail("Needs root. This phone did not grant it.")
+                // "Did not grant it" sent the user looking in Magisk for a refusal, when there was no Magisk
+                // running at all: root started with `fastboot boot` is gone after any restart.
+                is DiagCaptureResult.NoRoot -> fail(
+                    when (result.why) {
+                        RootShell.Root.NO_SU ->
+                            "Root is not active on this phone: there is no su. Root started with fastboot boot is lost on every restart."
+                        RootShell.Root.DENIED -> "Magisk refused FieldTap. Allow it in Magisk, under Superuser."
+                        RootShell.Root.TIMED_OUT -> "su did not answer. Is a Magisk prompt waiting on screen?"
+                        RootShell.Root.GRANTED -> "Root was granted but the check did not see it."
+                    },
+                )
 
                 DiagCaptureResult.NoLogger -> fail("This phone's modem does not expose signalling.")
 

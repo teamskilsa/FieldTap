@@ -4,8 +4,6 @@ import android.util.Log
 import com.fieldtap.diag.LogCodes
 import com.fieldtap.diag.LogMask
 import java.io.File
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 
@@ -17,8 +15,8 @@ sealed interface DiagCaptureResult {
     /** Stopped; [qmdl] is the file that was written, or null when the logger produced none. */
     data class Stopped(val qmdl: File?) : DiagCaptureResult
 
-    /** No `su` on this phone, or the grant was refused. */
-    data object NoRoot : DiagCaptureResult
+    /** Root was not available; [why] says whether there is no `su`, it refused, or it never answered. */
+    data class NoRoot(val why: RootShell.Root) : DiagCaptureResult
 
     /** `diag_mdlog` is not on this phone: its modem does not use the diag-router path. */
     data object NoLogger : DiagCaptureResult
@@ -51,12 +49,8 @@ sealed interface DiagCaptureResult {
 class HandsetDiagCapture(
     private val timeoutMs: Long = 10_000,
     /**
-     * The wait for the very first `su`, which is the one that raises the superuser prompt.
-     *
-     * A person has to notice the prompt, read it and tap Grant. Killing the process on the ordinary
-     * timeout while they are still deciding is recorded by the superuser app as a denial, and the
-     * next attempt is refused without asking — so a timeout that is merely generous for a command is
-     * a trap for a human.
+     * The wait for the very first `su`, which is the one that raises the superuser prompt: long enough for
+     * a person to notice it, read it and tap Grant.
      */
     private val grantTimeoutMs: Long = 90_000,
 ) {
@@ -75,7 +69,8 @@ class HandsetDiagCapture(
      * instance is stopped first, because two would fight over the same diag session.
      */
     suspend fun start(): DiagCaptureResult = runInterruptible(Dispatchers.IO) {
-        if (!hasRoot()) return@runInterruptible DiagCaptureResult.NoRoot
+        val root = RootShell.root(RootShell.exec(listOf("su", "-c", "id"), grantTimeoutMs))
+        if (root != RootShell.Root.GRANTED) return@runInterruptible DiagCaptureResult.NoRoot(root)
         if (!File(LOGGER).let { it.exists() || run("ls $LOGGER").contains(LOGGER) }) {
             return@runInterruptible DiagCaptureResult.NoLogger
         }
@@ -131,25 +126,9 @@ class HandsetDiagCapture(
 
     private fun running(): Boolean = run("pidof diag_mdlog").trim().isNotEmpty()
 
-    private fun hasRoot(): Boolean = run("id", grantTimeoutMs).contains("uid=0")
-
-    /** One `su -c` command, its combined output, or "" when su is absent or the wait ran out. */
-    private fun run(command: String, waitMs: Long = timeoutMs): String {
-        val process = try {
-            ProcessBuilder("su", "-c", command).redirectErrorStream(true).start()
-        } catch (e: IOException) {
-            return ""
-        }
-        return try {
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            if (!process.waitFor(waitMs, TimeUnit.MILLISECONDS)) process.destroy()
-            output
-        } catch (e: IOException) {
-            ""
-        } finally {
-            process.destroy()
-        }
-    }
+    /** One `su -c` command and its combined output, or "" when su is absent or the wait ran out. */
+    private fun run(command: String, waitMs: Long = timeoutMs): String =
+        RootShell.exec(listOf("su", "-c", command), waitMs).output
 
     private fun quote(path: String) = "'" + path.replace("'", "'\\''") + "'"
 
