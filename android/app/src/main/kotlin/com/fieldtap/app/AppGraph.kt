@@ -134,6 +134,12 @@ interface SessionRepository {
 
     suspend fun delete(dirName: String): Boolean
 
+    /**
+     * The session as a KML map at [precision], written beside the export zip; null when there is nothing to
+     * put on a map (precision "none", or no located sample and no track).
+     */
+    suspend fun exportMap(dirName: String, precision: LocationPrecision, name: String): java.io.File? = null
+
     suspend fun export(dirName: String, precision: LocationPrecision): ExportResult
 
     suspend fun storage(): StorageStatus

@@ -394,6 +394,10 @@ class SessionDetailViewModel(private val graph: AppGraph, private val dirName: S
     fun dismissDeleteError() {
         mutableState.update { it.copy(deleteError = null) }
     }
+
+    /** The session as a map at [precision], or null when there is nothing located to draw. */
+    suspend fun mapFile(precision: LocationPrecision): java.io.File? =
+        graph.sessions.exportMap(dirName, precision, mutableState.value.detail?.meta?.name ?: dirName)
 }
 
 /**
@@ -424,6 +428,7 @@ fun SessionDetailScreen(
             onSelectPrecision = viewModel::selectPrecision,
             onDelete = viewModel::delete,
             onDismissDeleteError = viewModel::dismissDeleteError,
+            onMap = viewModel::mapFile,
         ),
         modifier = modifier,
     )
@@ -436,6 +441,7 @@ private data class DetailActions(
     val onSelectPrecision: (LocationPrecision) -> Unit,
     val onDelete: () -> Unit,
     val onDismissDeleteError: () -> Unit,
+    val onMap: suspend (LocationPrecision) -> java.io.File?,
 )
 
 /** Shown for a value session.json does not have. */
@@ -790,6 +796,7 @@ private fun SessionDetailContent(state: SessionDetailUiState, actions: DetailAct
     val title = meta?.name ?: detail?.summary?.name ?: stringResource(R.string.detail_title)
     val shareSubject = stringResource(R.string.detail_share_subject, title)
     val shareFailed = stringResource(R.string.detail_share_failed)
+    val noMap = stringResource(R.string.detail_map_none)
 
     val deleteErrorText = state.deleteError?.let {
         stringResource(if (it == DeleteError.RECORDING) R.string.detail_delete_recording else R.string.detail_delete_failed)
@@ -894,6 +901,24 @@ private fun SessionDetailContent(state: SessionDetailUiState, actions: DetailAct
                         }
                         if (!shared) scope.launch { snackbarHostState.showSnackbar(shareFailed) }
                     },
+                    onShareMap = {
+                        scope.launch {
+                            val file = actions.onMap(precision)
+                            if (file == null) {
+                                snackbarHostState.showSnackbar(noMap)
+                                return@launch
+                            }
+                            val shared = try {
+                                FileSharer.share(context = context, file = file, mimeType = FileSharer.KML_MIME_TYPE, subject = shareSubject, text = null)
+                                true
+                            } catch (e: ActivityNotFoundException) {
+                                false
+                            } catch (e: IllegalArgumentException) {
+                                false
+                            }
+                            if (!shared) snackbarHostState.showSnackbar(shareFailed)
+                        }
+                    },
                 )
             }
         }
@@ -929,6 +954,7 @@ private fun DetailList(
     onPrecision: (LocationPrecision) -> Unit,
     onBuild: () -> Unit,
     onShare: (ExportResult, String) -> Unit,
+    onShareMap: () -> Unit,
 ) {
     val recording = detail.summary.recording
     LazyColumn(
@@ -971,6 +997,7 @@ private fun DetailList(
                     onPrecision = onPrecision,
                     onBuild = onBuild,
                     onShare = onShare,
+                    onShareMap = onShareMap,
                     modifier = Modifier.contentWidth(),
                 )
             }
@@ -1206,6 +1233,7 @@ private fun ShareCard(
     onPrecision: (LocationPrecision) -> Unit,
     onBuild: () -> Unit,
     onShare: (ExportResult, String) -> Unit,
+    onShareMap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val building = export == ExportState.Building
@@ -1274,6 +1302,20 @@ private fun ShareCard(
                         .fillMaxWidth()
                         .heightIn(min = Sizes.MinTouchTarget),
                 ) { Text(text = stringResource(R.string.action_retry)) }
+            }
+        }
+        // The map follows the same precision choice as the zip, and there is no map without positions.
+        if (precision != LocationPrecision.NONE && !building) {
+            OutlinedButton(
+                onClick = onShareMap,
+                shape = ShapeRoles.Control,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Sizes.MinTouchTarget),
+            ) {
+                Icon(imageVector = FieldTapIcons.Location, contentDescription = null, modifier = Modifier.size(Sizes.IconSmall))
+                Spacer(modifier = Modifier.width(Spacing.Sm))
+                Text(text = stringResource(R.string.detail_share_map))
             }
         }
         Text(

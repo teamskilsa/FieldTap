@@ -469,6 +469,9 @@
     <string name="detail_build_zip">Build zip</string>
     <string name="detail_building_zip">Building the zip…</string>
     <string name="detail_share_zip">Share zip</string>
+    <!-- Shares the session as a KML file: the route and every sample coloured by RSRP. -->
+    <string name="detail_share_map">Share map (KML)</string>
+    <string name="detail_map_none">Nothing in this session has a location to put on a map.</string>
     <string name="detail_row_zip">File</string>
     <string name="detail_row_zip_size">Size</string>
     <string name="detail_row_sha256">SHA-256</string>

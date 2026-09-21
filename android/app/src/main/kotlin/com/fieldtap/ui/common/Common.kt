@@ -50,6 +50,9 @@ object FileSharer {
     /** The MIME type of an export zip. */
     const val ZIP_MIME_TYPE: String = "application/zip"
 
+    /** The MIME type of a session map; Google Earth and My Maps register for it. */
+    const val KML_MIME_TYPE: String = "application/vnd.google-earth.kml+xml"
+
     /** Matches the manifest's `${applicationId}.fileprovider`. */
     fun authority(context: Context): String = context.packageName + ".fileprovider"
 

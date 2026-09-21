@@ -133,6 +133,18 @@ class FileSessionRepository(
             }
         }
 
+    override suspend fun exportMap(dirName: String, precision: LocationPrecision, name: String): File? =
+        withContext(Dispatchers.IO) {
+            exportLock.withLock {
+                if (!isSessionName(dirName) || dirName == activeDirName()) return@withLock null
+                val kml = com.fieldtap.core.export.SessionKml.build(paths.directory(dirName), name, precision)
+                    ?: return@withLock null
+                if (!exportDir.isDirectory && !exportDir.mkdirs()) return@withLock null
+                exportDir.listFiles()?.filter { it.isFile && it.name.endsWith(KML_SUFFIX) }?.forEach { it.delete() }
+                File(exportDir, dirName + KML_SUFFIX).apply { writeText(kml, Charsets.UTF_8) }
+            }
+        }
+
     override suspend fun storage(): StorageStatus = withContext(Dispatchers.IO) {
         StorageStatus(
             usedBytes = StorageUsage.usedBytes(paths.root),
@@ -189,13 +201,15 @@ class FileSessionRepository(
             if (!file.isFile || file.name == keep) continue
             // Older zips, and the temporary files of an export that died with the process. The export lock
             // guarantees no export is writing now; a probe report and its temporary file are never touched.
-            val exportFile = file.name.endsWith(ZIP_SUFFIX) || file.name.endsWith(PART_SUFFIX) || file.name.endsWith(TMP_SUFFIX)
+            val exportFile = file.name.endsWith(ZIP_SUFFIX) || file.name.endsWith(PART_SUFFIX) ||
+                file.name.endsWith(TMP_SUFFIX) || file.name.endsWith(KML_SUFFIX)
             if (exportFile) file.delete()
         }
     }
 
     private companion object {
         const val ZIP_SUFFIX = ".zip"
+        const val KML_SUFFIX = ".kml"
         /** `SessionExporter` writes `<dirName>.<random>.zip.part` and renames it when the zip is complete. */
         const val PART_SUFFIX = ".zip.part"
 
