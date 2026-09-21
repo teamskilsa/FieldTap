@@ -55,6 +55,8 @@ import com.fieldtap.platform.Permissions
 import com.fieldtap.ui.common.SystemSettings
 import com.fieldtap.ui.components.ChartMath
 import com.fieldtap.ui.components.FieldTapTopBar
+import com.fieldtap.ui.components.InstrumentPanel
+import com.fieldtap.ui.components.InstrumentTag
 import com.fieldtap.ui.components.SignalBars
 import com.fieldtap.ui.live.LivePresentation
 import com.fieldtap.ui.live.LiveViewModel
@@ -134,7 +136,7 @@ fun SignalScreen(viewModel: LiveViewModel, modifier: Modifier = Modifier) {
                 item(key = "hero") { Hero(serving, live) }
                 item(key = "chart") {
                     // No panel title: the chart heads itself with "RSRP · last 5 min" and the latest value.
-                    Panel {
+                    InstrumentPanel {
                         SignalChart(
                             rsrp = live.rsrpSeries,
                             sinr = emptyList(),
@@ -161,10 +163,10 @@ private fun Hero(cell: LiveCell, live: LiveState) {
     val quality = SignalScale.quality(SignalMetric.RSRP, cell.rsrp)
     val level = FieldTapDesign.colors.signal.of(quality)
     val stale = live.servingAgeMs != null && live.servingAgeMs!! > STALE_AFTER_MS
-    Panel {
+    InstrumentPanel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Tag(text = ratName(cell.rat), color = ratColor(cell.rat))
-            bandLabel(cell)?.let { Tag(text = it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            InstrumentTag(text = ratName(cell.rat), color = ratColor(cell.rat))
+            bandLabel(cell)?.let { InstrumentTag(text = it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
@@ -289,7 +291,7 @@ private fun ServingDetails(cell: LiveCell) {
         }
         add(stringResource(R.string.sig_cqi) to (cell.cqi?.takeIf { it in 0..15 }?.toString() ?: "—"))
     }
-    Panel(title = stringResource(R.string.sig_serving_cell)) { KeyValueGrid(rows) }
+    InstrumentPanel(title = stringResource(R.string.sig_serving_cell)) { KeyValueGrid(rows) }
 }
 
 @Composable
@@ -301,7 +303,7 @@ private fun NrLeg(leg: LiveCell) {
         stringResource(R.string.sig_band) to (leg.band?.let { "n$it" } ?: "—"),
         "SS-RSRP" to (leg.rsrp?.let { "$it dBm" } ?: "—"),
     )
-    Panel(title = stringResource(R.string.sig_nr_leg), accent = ratColor(Rat.NR)) { KeyValueGrid(rows) }
+    InstrumentPanel(title = stringResource(R.string.sig_nr_leg), accent = ratColor(Rat.NR)) { KeyValueGrid(rows) }
 }
 
 /** Two columns of label over value. The values are the point, so they are the larger, brighter text. */
@@ -337,7 +339,7 @@ private fun KeyValueGrid(rows: List<Pair<String, String>>) {
 @Composable
 private fun Neighbours(rows: List<NeighbourRow>) {
     val sorted = rows.sortedByDescending { it.cell.rsrp ?: Int.MIN_VALUE }
-    Panel(title = stringResource(R.string.sig_neighbours), count = rows.size) {
+    InstrumentPanel(title = stringResource(R.string.sig_neighbours), count = rows.size) {
         if (sorted.isEmpty()) {
             Text(
                 stringResource(R.string.sig_neighbours_none),
@@ -420,7 +422,7 @@ private fun NoCell(live: LiveState) {
             stringResource(R.string.sig_out_of_service)
         else -> stringResource(R.string.sig_waiting)
     }
-    Panel {
+    InstrumentPanel {
         Text(stringResource(R.string.sig_no_cell_title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -428,7 +430,7 @@ private fun NoCell(live: LiveState) {
 
 @Composable
 private fun Notice(title: String, message: String, action: String, onAction: () -> Unit) {
-    Panel(accent = MaterialTheme.colorScheme.error) {
+    InstrumentPanel(accent = MaterialTheme.colorScheme.error) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
         Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         androidx.compose.material3.FilledTonalButton(onClick = onAction, modifier = Modifier.padding(top = 4.dp)) { Text(action) }
@@ -436,57 +438,6 @@ private fun Notice(title: String, message: String, action: String, onAction: () 
 }
 
 // MARK: - Pieces
-
-/**
- * The one container on this screen: a flat dark panel with a hairline and a small uppercase title.
- * No shadow — on a near-black ground a shadow is invisible and a hairline is what separates things.
- */
-@Composable
-private fun Panel(
-    title: String? = null,
-    count: Int? = null,
-    accent: Color? = null,
-    content: @Composable () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(1.dp, accent?.copy(alpha = 0.45f) ?: MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (title != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        title.uppercase(Locale.ROOT),
-                        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold),
-                        color = accent ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (count != null) {
-                        Text(
-                            "  $count",
-                            style = MaterialTheme.typography.labelMedium.tabular(),
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                }
-            }
-            content()
-        }
-    }
-}
-
-@Composable
-private fun Tag(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.14f)) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            color = color,
-        )
-    }
-}
 
 /** A green dot and the age of the newest reading, so a frozen number is never mistaken for a live one. */
 @Composable

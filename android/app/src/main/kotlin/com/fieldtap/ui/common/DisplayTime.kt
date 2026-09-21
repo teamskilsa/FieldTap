@@ -56,6 +56,14 @@ object DisplayTime {
             .withZone(zone)
             .format(Instant.ofEpochMilli(utcMs))
 
+    /** "14:30:05.123" or "2:30:05.123 PM": [locale]'s medium time with milliseconds, for signalling timestamps. */
+    fun timeWithMillis(utcMs: Long, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String {
+        val pattern = DateTimeFormatterBuilder.getLocalizedDateTimePattern(null, FormatStyle.MEDIUM, IsoChronology.INSTANCE, locale)
+        return DateTimeFormatter.ofPattern(pattern.replace("ss", "ss.SSS"), locale)
+            .withZone(zone)
+            .format(Instant.ofEpochMilli(utcMs))
+    }
+
     /**
      * How far the day of [utcMs] lies before the day of [nowUtcMs] in [zone], for a list row that says "Today 6:19 PM",
      * "Yesterday 9:12 AM", "Wed 6:02 PM", "Sep 9" or "Sep 9, 2025". A day after today (a clock set back) is never

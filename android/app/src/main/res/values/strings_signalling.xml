@@ -11,34 +11,112 @@
 -->
 <resources>
     <!-- Signalling capture (rooted phones only). -->
-    <string name="signalling_title">Signalling</string>
-    <string name="signalling_export">Export the raw file</string>
+    <string name="signalling_export">Export for Wireshark</string>
     <string name="signalling_export_subject">FieldTap signalling capture</string>
-    <string name="signalling_flow_title">Call flow</string>
-    <!-- %1$s the NAS messages shown, %2$s the records not decoded here (RRC). -->
-    <string name="signalling_flow_subtitle">%1$s · %2$s left for Wireshark</string>
-    <plurals name="signalling_messages">
-        <item quantity="one">%1$d message</item>
-        <item quantity="other">%1$d messages</item>
-    </plurals>
-    <plurals name="signalling_records">
-        <item quantity="one">%1$d record</item>
-        <item quantity="other">%1$d records</item>
-    </plurals>
-    <string name="signalling_uplink">phone → network</string>
-    <string name="signalling_downlink">network → phone</string>
-    <!-- %1$d is the 3GPP cause value, %2$s its name. -->
-    <string name="signalling_cause">Cause %1$d · %2$s</string>
     <string name="signalling_reading">Reading…</string>
     <string name="signalling_unreadable">This capture could not be read.</string>
     <string name="signalling_quiet_title">No signalling in this one</string>
-    <string name="signalling_quiet_message">The modem recorded, but none of it was RRC or NAS. That is what a phone that is not attached to a network sounds like — check the service state on Live. The raw file is kept either way.</string>
-    <!-- %1$s is the file size. Shown when the capture holds no log records at all. -->
-    <string name="signalling_flow_nothing_read">%1$s recorded · no RRC or NAS in it</string>
+    <string name="signalling_quiet_message">The modem recorded, but none of it was RRC or NAS. That is what a phone that is not attached to a network sounds like — check the service state on Signal. The raw file is kept either way.</string>
+
+    <!-- Call flow: the summary at the top. -->
+    <string name="flow_stat_duration">Duration</string>
+    <string name="flow_stat_messages">Messages</string>
+    <string name="flow_stat_procedures">Procedures</string>
+    <string name="flow_stat_failures">Failures</string>
+    <!-- %1$s the modem's clock time of the first record, in local time. -->
+    <string name="flow_started_at">Modem clock at start %1$s</string>
+    <!-- %1$d records the phone logged but does not decode (NR RRC, state logs). -->
+    <plurals name="flow_undecoded">
+        <item quantity="one">%1$s record is not decoded here; it is in the export.</item>
+        <item quantity="other">%1$s records are not decoded here; they are in the export.</item>
+    </plurals>
+
+    <!-- Call flow: the timeline of RRC connections, cell changes and failures. -->
+    <string name="flow_timeline">Timeline</string>
+    <string name="flow_legend_connected">Connected</string>
+    <string name="flow_legend_cell_change">Cell change</string>
+    <string name="flow_legend_failure">Failure</string>
+    <string name="flow_legend_no_answer">No answer</string>
+
+    <!-- Call flow: the cells the phone was on, in order. -->
+    <string name="flow_cells">Cells</string>
+    <string name="flow_cells_one">Stayed on this cell for the whole capture.</string>
+    <!-- %1$d cells whose system information the phone read without ever signalling on them. -->
+    <plurals name="flow_cells_searched">
+        <item quantity="one">Also read the system information of %1$s other cell while searching.</item>
+        <item quantity="other">Also read the system information of %1$s other cells while searching.</item>
+    </plurals>
+    <string name="flow_move_handover">Handover</string>
+    <string name="flow_move_reselection">Reselection</string>
+    <string name="flow_move_redirect">Redirect</string>
+    <string name="flow_move_reestablishment">Re-establishment</string>
+    <string name="flow_move_change">Cell change</string>
+
+    <!-- Call flow: procedures. -->
+    <string name="flow_procedures">Procedures</string>
+    <string name="flow_outcome_succeeded">Succeeded</string>
+    <string name="flow_outcome_failed">Failed</string>
+    <string name="flow_outcome_unanswered">No answer in this capture</string>
+    <!-- The same, where there is room for two words: a procedure header in the ladder. -->
+    <string name="flow_outcome_unanswered_short">no answer</string>
+    <!-- %1$d attempts of one procedure that succeeded / failed / went unanswered. -->
+    <string name="flow_count_succeeded">%1$d succeeded</string>
+    <string name="flow_count_failed">%1$d failed</string>
+    <string name="flow_count_unanswered">%1$d no answer</string>
+    <!-- %1$s a duration, e.g. "280 ms": the median of the attempts that succeeded. -->
+    <string name="flow_median">median %1$s</string>
+    <!-- %1$d attempts not listed. -->
+    <string name="flow_more">and %1$d more</string>
+
+    <!-- Call flow: the ladder. -->
+    <string name="flow_messages">Messages</string>
+    <string name="flow_filter_all">All</string>
+    <string name="flow_filter_rrc">RRC</string>
+    <string name="flow_filter_nas">NAS</string>
+    <!-- %1$d times the same broadcast message repeated. -->
+    <string name="flow_repeats">×%1$d</string>
+    <!-- A folded run of broadcast messages of more than one kind or from more than one cell. -->
+    <string name="flow_broadcast_group">System information</string>
+    <string name="flow_protected">Security protected</string>
+
+    <!-- Call flow: one message, opened. -->
+    <string name="flow_detail_when">When</string>
+    <string name="flow_detail_modem_time">Modem time</string>
+    <string name="flow_detail_since_start">Since start</string>
+    <string name="flow_detail_after_previous">After previous</string>
+    <string name="flow_detail_cell">Cell</string>
+    <string name="flow_detail_band">Band</string>
+    <string name="flow_detail_downlink">Downlink</string>
+    <string name="flow_detail_cell_nearby">From the RRC messages around it</string>
+    <!-- %1$s the RRC message a NAS message travelled inside, e.g. "RRC Setup Complete". -->
+    <string name="flow_detail_carried">Carried in %1$s</string>
+    <string name="flow_detail_plmn">PLMN</string>
+    <string name="flow_detail_tac">Tracking area</string>
+    <string name="flow_detail_enb">eNB · cell</string>
+    <string name="flow_detail_bandwidth">Bandwidth</string>
+    <string name="flow_detail_decoded">Decoded</string>
+    <string name="flow_detail_nothing_decoded">The rest of this message is ASN.1 for Wireshark. Export the capture to see every field.</string>
+    <string name="flow_detail_ciphered">Ciphered, and the modem logged no plain copy, so what it was cannot be read.</string>
+    <string name="flow_detail_security">Security</string>
+    <string name="flow_detail_security_header">Header</string>
+    <string name="flow_detail_mac">MAC</string>
+    <string name="flow_detail_sequence">Sequence number</string>
+    <string name="flow_detail_cause">Cause</string>
+    <!-- %1$d bytes in the PDU. -->
+    <string name="flow_detail_bytes">Bytes · %1$d</string>
+    <string name="flow_detail_copy_hex">Copy hex</string>
+    <string name="flow_detail_copied">Copied</string>
+    <!-- %1$s the log code, e.g. 0xB0C0; %2$d the record number in the file. -->
+    <string name="flow_detail_source">Log %1$s · record %2$d</string>
+    <string name="flow_detail_previous">Previous</string>
+    <string name="flow_detail_next">Next</string>
+    <!-- %1$s sender, %2$s receiver: "UE → eNB". -->
+    <string name="flow_direction">%1$s → %2$s</string>
+
     <!-- How a capture names itself in the Recordings list, beside the drives. -->
     <string name="recordings_capture_kind">Call flow</string>
-    <!-- %1$d messages the network refused. -->
-    <string name="recordings_capture_rejects">%1$d rejected</string>
+    <!-- %1$d messages that were a reject or a failure. -->
+    <string name="recordings_capture_rejects">%1$d failed</string>
     <!-- %1$d messages seen. -->
     <string name="recordings_capture_messages">%1$d messages</string>
     <string name="recordings_capture_quiet">Quiet</string>

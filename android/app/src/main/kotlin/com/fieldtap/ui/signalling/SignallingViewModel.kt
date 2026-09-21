@@ -4,8 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fieldtap.data.CaptureStore
 import com.fieldtap.data.SavedCapture
-import com.fieldtap.diag.SignallingEntry
-import com.fieldtap.diag.SignallingReader
+import com.fieldtap.diag.CallFlow
 import com.fieldtap.platform.diag.DiagCaptureResult
 import com.fieldtap.platform.diag.HandsetDiagCapture
 import com.fieldtap.platform.diag.RootShell
@@ -39,9 +38,7 @@ data class SignallingUiState(
 /** One capture, opened. */
 data class CaptureDetailUiState(
     val capture: SavedCapture? = null,
-    val entries: List<SignallingEntry> = emptyList(),
-    /** Log records that made no call-flow line, almost all of them RRC. */
-    val otherRecords: Int = 0,
+    val flow: CallFlow.Flow? = null,
     val loading: Boolean = true,
     val failed: Boolean = false,
 )
@@ -137,20 +134,20 @@ class SignallingViewModel(
                 return@launch
             }
             val saved = withContext(Dispatchers.IO) {
-                val summary = try {
-                    SignallingReader.read(file.readBytes())
+                val flow = try {
+                    CallFlow.read(file.readBytes())
                 } catch (e: IOException) {
                     null
                 }
-                if (summary == null) {
+                if (flow == null) {
                     null
                 } else {
                     store.save(
                         source = file,
                         startedUtcMs = startedUtcMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                        records = summary.records,
-                        messages = summary.entries.size,
-                        rejects = summary.rejects.size,
+                        records = flow.records,
+                        messages = flow.events.size,
+                        rejects = flow.failures,
                     )
                 }
             }
@@ -219,9 +216,9 @@ class CaptureDetailViewModel(
                 _state.value = CaptureDetailUiState(loading = false, failed = true)
                 return@launch
             }
-            val summary = withContext(Dispatchers.IO) {
+            val flow = withContext(Dispatchers.IO) {
                 try {
-                    SignallingReader.read(file.readBytes())
+                    CallFlow.read(file.readBytes())
                 } catch (e: IOException) {
                     null
                 } catch (e: OutOfMemoryError) {
@@ -229,16 +226,10 @@ class CaptureDetailViewModel(
                     null
                 }
             }
-            _state.value = if (summary == null) {
+            _state.value = if (flow == null) {
                 CaptureDetailUiState(capture = capture, loading = false, failed = true)
             } else {
-                CaptureDetailUiState(
-                    capture = capture,
-                    entries = summary.entries,
-                    otherRecords = summary.records - summary.entries.size,
-                    loading = false,
-                    failed = false,
-                )
+                CaptureDetailUiState(capture = capture, flow = flow, loading = false, failed = false)
             }
         }
     }

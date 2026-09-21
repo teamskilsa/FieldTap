@@ -66,6 +66,8 @@ class DisplayTimeTest {
     fun timesAreShownInTheGivenZone() {
         assertEquals("14:30", DisplayTime.time(started, ZoneOffset.UTC, Locale.UK))
         assertEquals("14:30:00", DisplayTime.timeWithSeconds(started, ZoneOffset.UTC, Locale.UK))
+        assertEquals("14:30:00.042", DisplayTime.timeWithMillis(started + 42, ZoneOffset.UTC, Locale.UK))
+        assertEquals("2:30:00.042\u202FPM", DisplayTime.timeWithMillis(started + 42, ZoneOffset.UTC, Locale.US).replace(' ', '\u202F'))
         assertEquals("20:00", DisplayTime.time(started, ZoneId.of("Asia/Kolkata"), Locale.UK))
         val utc = DisplayTime.dateTime(started, ZoneOffset.UTC, Locale.UK)
         val kolkata = DisplayTime.dateTime(started, ZoneId.of("Asia/Kolkata"), Locale.UK)

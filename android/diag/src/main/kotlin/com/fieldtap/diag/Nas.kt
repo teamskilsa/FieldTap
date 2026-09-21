@@ -176,7 +176,19 @@ object Nas {
     fun decode(body: ByteArray, nr: Boolean): Message? {
         val found = locate(body, nr) ?: return null
         val (offset, located) = found
-        val pdu = body.copyOfRange(offset, body.size)
+        return decodePdu(body.copyOfRange(offset, body.size), nr, offset, located)
+    }
+
+    /**
+     * Read a PDU that is already known to start at its NAS header, such as the message inside a
+     * security-protected one. Null when it does not look like NAS.
+     */
+    fun decodePdu(pdu: ByteArray, nr: Boolean): Message? {
+        val looks = if (nr) looksLike5gs(pdu, 0) else looksLikeEps(pdu, 0)
+        return if (looks) decodePdu(pdu, nr, 0, Located.TABLE) else null
+    }
+
+    private fun decodePdu(pdu: ByteArray, nr: Boolean, offset: Int, located: Located): Message {
         val (sublayer, sec, msgType) = if (nr) classify5gs(pdu) else classifyEps(pdu)
         val named = if (sublayer == "emm" && sec == 12) {
             "Service request" to "ul"
