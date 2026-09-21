@@ -60,6 +60,29 @@
     <string name="traffic_ping_to">Ping · %1$s</string>
     <string name="traffic_did_not_run">Did not run</string>
     <string name="traffic_history">History</string>
+    <string name="traffic_export_csv">Export CSV</string>
+    <string name="traffic_failed">Failed</string>
+    <!-- Sequence: the test above, repeated. -->
+    <string name="traffic_sequence">Sequence</string>
+    <string name="traffic_sequence_steps">Steps</string>
+    <string name="traffic_sequence_rounds">Rounds</string>
+    <string name="traffic_sequence_gap">Gap</string>
+    <string name="traffic_sequence_forever">Until stopped</string>
+    <string name="traffic_sequence_run">Run sequence</string>
+    <!-- %1$s iperf2/iPerf3, %2$s TCP/UDP, %3$d seconds per data step. -->
+    <string name="traffic_sequence_uses">Download and upload use %1$s, %2$s, %3$d s each, on the server above.</string>
+    <!-- %1$d round, %2$d of how many, %3$s the step running. -->
+    <string name="traffic_sequence_progress">Round %1$d of %2$d · %3$s</string>
+    <string name="traffic_sequence_progress_forever">Round %1$d · %2$s</string>
+    <!-- %1$d seconds until the next round. -->
+    <string name="traffic_sequence_waiting">Next round in %1$d s</string>
+    <!-- %1$d tests in the last sequence. -->
+    <string name="traffic_sequence_summary">Last sequence · %1$d tests</string>
+    <string name="traffic_median_download">Median download</string>
+    <string name="traffic_median_upload">Median upload</string>
+    <string name="traffic_median_rtt">Median round trip</string>
+    <string name="traffic_ping_loss">Ping loss</string>
+    <string name="traffic_failures">Failures</string>
     <string name="traffic_dl" translatable="false">DL</string>
     <string name="traffic_ul" translatable="false">UL</string>
     <!-- Why a run failed. %1$s is the host, %2$s the port. -->

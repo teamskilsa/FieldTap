@@ -71,6 +71,9 @@ import java.util.Locale
 @Composable
 fun TrafficScreen(viewModel: TrafficViewModel, modifier: Modifier = Modifier) {
     val s by viewModel.state.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // A sequence runs for an hour with the phone on the dashboard: the screen must not sleep under it.
+    com.fieldtap.ui.live.KeepScreenOnEffect(enabled = s.running)
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.background,
@@ -102,12 +105,34 @@ fun TrafficScreen(viewModel: TrafficViewModel, modifier: Modifier = Modifier) {
                 }
             }
             item(key = "go") { StartStop(s, viewModel) }
+            item(key = "sequence") { SequencePanel(s, viewModel) }
             s.sampled?.let { run -> if (s.running || s.samples.isNotEmpty()) item(key = "live") { LivePanel(s, run) } }
             s.error?.let { item(key = "error") { ErrorPanel(it) } }
             s.result?.let { item(key = "result") { ResultPanel(it) } }
-            if (s.history.size > 1) {
-                item(key = "history-title") { SectionTitle(stringResource(R.string.traffic_history)) }
-                items(s.history.drop(1), key = { it.finishedAtMs }) { HistoryRow(it) }
+            if (s.sequenceResults.isNotEmpty()) item(key = "sequence-summary") { SequenceSummaryPanel(SequenceStats.summarize(s.sequenceResults)) }
+            if (s.history.isNotEmpty()) {
+                item(key = "history-title") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.traffic_history)) }
+                        androidx.compose.material3.TextButton(
+                            onClick = {
+                                viewModel.exportCsv()?.let { file ->
+                                    runCatching {
+                                        com.fieldtap.ui.common.FileSharer.share(
+                                            context = context,
+                                            file = file,
+                                            mimeType = "text/csv",
+                                            subject = file.name,
+                                            text = null,
+                                        )
+                                    }
+                                }
+                            },
+                            enabled = !s.running,
+                        ) { Text(stringResource(R.string.traffic_export_csv)) }
+                    }
+                }
+                items(s.history, key = { "${it.finishedAtMs}-${it.javaClass.simpleName}" }) { HistoryRow(it) }
             }
         }
     }
@@ -330,6 +355,7 @@ private fun Bars(values: List<Double?>, slots: Int, color: Color, lostColor: Col
 @Composable
 private fun ResultPanel(result: TrafficResult) {
     when (result) {
+        is TrafficResult.Failed -> ErrorPanel(result.message)
         is TrafficResult.Iperf -> {
             val o = result.options
             val title = versionName(result.version) + " · " + pluralStringResource(
@@ -396,14 +422,115 @@ private fun HistoryRow(result: TrafficResult) {
         }
 
         is TrafficResult.Ping -> stringResource(R.string.traffic_ping_to, result.host) to "${result.avgMs?.let { fmt(it, 1) } ?: "—"} ms · ${fmt(result.lossPercent, 0)}%"
+        is TrafficResult.Failed -> "${result.test} · ${result.message}" to stringResource(R.string.traffic_failed)
     }
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(time, style = MaterialTheme.typography.labelMedium.tabular(), color = MaterialTheme.colorScheme.outline, modifier = Modifier.width(72.dp))
             Text(what, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(value, style = MaterialTheme.typography.titleSmall.tabular(), color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleSmall.tabular(),
+                color = if (result is TrafficResult.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
+}
+
+// MARK: - Sequence
+
+/**
+ * The test above, repeated: which steps, how many rounds, how long between them. While it runs, where it is;
+ * the Stop button above ends it.
+ */
+@Composable
+private fun SequencePanel(s: TrafficUiState, vm: TrafficViewModel) {
+    val progress = s.sequence
+    Panel(title = stringResource(R.string.traffic_sequence)) {
+        if (progress != null) {
+            val step = stepName(progress.step)
+            Text(
+                when {
+                    progress.waitingSec != null -> stringResource(R.string.traffic_sequence_waiting, progress.waitingSec)
+                    progress.rounds == SequencePlan.UNTIL_STOPPED -> stringResource(R.string.traffic_sequence_progress_forever, progress.round, step)
+                    else -> stringResource(R.string.traffic_sequence_progress, progress.round, progress.rounds, step)
+                },
+                style = MaterialTheme.typography.titleMedium.tabular(),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            return@Panel
+        }
+        OptionRow(stringResource(R.string.traffic_sequence_steps)) {
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                SequenceStep.entries.forEach { step ->
+                    val on = step in s.sequenceSteps
+                    Surface(
+                        onClick = { vm.toggleSequenceStep(step) },
+                        enabled = !s.running,
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Text(
+                            stepName(step),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (on) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        OptionRow(stringResource(R.string.traffic_sequence_rounds)) {
+            val forever = stringResource(R.string.traffic_sequence_forever)
+            Chips(listOf(1, 5, 10, 30, SequencePlan.UNTIL_STOPPED), s.sequenceRounds, { if (it == SequencePlan.UNTIL_STOPPED) forever else "$it" }, !s.running, vm::setSequenceRounds)
+        }
+        OptionRow(stringResource(R.string.traffic_sequence_gap)) {
+            val secondsLabel = stringResource(R.string.traffic_seconds)
+            Chips(listOf(0, 10, 30, 60), s.sequenceGapSec, { secondsLabel.format(it) }, !s.running, vm::setSequenceGap)
+        }
+        if (SequenceStep.DOWNLOAD in s.sequenceSteps || SequenceStep.UPLOAD in s.sequenceSteps) {
+            Text(
+                stringResource(R.string.traffic_sequence_uses, versionName(if (s.sequenceIperf == TrafficMode.IPERF3) IperfVersion.V3 else IperfVersion.V2), s.protocol.name, s.durationSec),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        androidx.compose.material3.OutlinedButton(
+            onClick = vm::startSequence,
+            enabled = s.canStartSequence,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).heightIn(min = 48.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) { Text(stringResource(R.string.traffic_sequence_run)) }
+    }
+}
+
+/** The medians of the last sequence: the numbers a drive report quotes. */
+@Composable
+private fun SequenceSummaryPanel(summary: SequenceSummary) {
+    val mbps = stringResource(R.string.traffic_mbps)
+    Panel(title = stringResource(R.string.traffic_sequence_summary, summary.tests)) {
+        Grid(
+            listOfNotNull(
+                summary.downloadMbps?.let { stringResource(R.string.traffic_median_download) to "${fmt(it, 1)} $mbps" },
+                summary.uploadMbps?.let { stringResource(R.string.traffic_median_upload) to "${fmt(it, 1)} $mbps" },
+                summary.rttMs?.let { stringResource(R.string.traffic_median_rtt) to "${fmt(it, 1)} ms" },
+                summary.pingLossPercent?.let { stringResource(R.string.traffic_ping_loss) to "${fmt(it, 1)}%" },
+                stringResource(R.string.traffic_failures) to "${summary.failures}",
+            ),
+        )
+    }
+}
+
+@Composable
+private fun stepName(step: SequenceStep): String = when (step) {
+    SequenceStep.PING -> stringResource(R.string.traffic_ping)
+    SequenceStep.DOWNLOAD -> stringResource(R.string.traffic_download)
+    SequenceStep.UPLOAD -> stringResource(R.string.traffic_upload)
 }
 
 // MARK: - Pieces
@@ -434,7 +561,11 @@ private fun OptionRow(label: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun <T> Chips(options: List<T>, selected: T, label: (T) -> String, enabled: Boolean, onSelect: (T) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    // Wraps rather than squeezes: "Until stopped" beside four numbers does not fit a phone's width.
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         options.forEach { option ->
             val on = option == selected
             Surface(

@@ -26,6 +26,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +84,15 @@ sealed interface TrafficResult {
     ) : TrafficResult {
         val lossPercent: Double get() = if (sent == 0) 0.0 else (sent - received) * 100.0 / sent
     }
+
+    /** A test in a sequence that did not produce a result: kept in the log, so a sequence's gaps show. */
+    data class Failed(
+        override val finishedAtMs: Long,
+        /** "ping", "iperf2", "iperf3". */
+        val test: String,
+        val host: String,
+        val message: String,
+    ) : TrafficResult
 }
 
 data class TrafficUiState(
@@ -108,7 +118,27 @@ data class TrafficUiState(
     val result: TrafficResult? = null,
     val error: String? = null,
     val history: List<TrafficResult> = emptyList(),
+    val sequenceSteps: Set<SequenceStep> = SequenceStep.entries.toSet(),
+    val sequenceRounds: Int = 5,
+    val sequenceGapSec: Int = 10,
+    /** The iperf a sequence's download and upload steps use: the last one chosen above. */
+    val sequenceIperf: TrafficMode = TrafficMode.IPERF2,
+    /** Non-null while a sequence runs. */
+    val sequence: SequenceProgress? = null,
+    /** When the last sequence started, to summarise only what it measured. */
+    val sequenceStartedAtMs: Long? = null,
 ) {
+    val plan: SequencePlan get() = SequencePlan(sequenceSteps, sequenceRounds, sequenceGapSec)
+
+    /** A sequence needs the server, and an iperf port when it moves data. */
+    val canStartSequence: Boolean
+        get() = !running && host.isNotBlank() && plan.runnable &&
+            (sequenceSteps == setOf(SequenceStep.PING) || (portNumber != null && (protocol == IperfProtocol.TCP || udpBitrateBps != null)))
+
+    /** What the last sequence measured, once it has measured something. */
+    val sequenceResults: List<TrafficResult>
+        get() = sequenceStartedAtMs?.let { start -> history.filter { it.finishedAtMs >= start } }.orEmpty()
+
     val portNumber: Int? get() = port.toIntOrNull()?.takeIf { it in 1..65_535 }
     val udpBitrateBps: Long? get() = udpMbps.toDoubleOrNull()?.takeIf { it > 0 && it <= 10_000 }?.let { (it * 1_000_000).toLong() }
 
@@ -152,7 +182,97 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
     fun setMode(value: TrafficMode) = edit { current ->
         val otherDefault = current.mode.defaultPort?.toString()
         val port = if (value.defaultPort != null && (current.port == otherDefault || current.port.isBlank())) value.defaultPort.toString() else current.port
-        current.copy(mode = value, port = port)
+        current.copy(mode = value, port = port, sequenceIperf = if (value == TrafficMode.PING) current.sequenceIperf else value)
+    }
+
+    fun toggleSequenceStep(step: SequenceStep) = edit {
+        it.copy(sequenceSteps = if (step in it.sequenceSteps) it.sequenceSteps - step else it.sequenceSteps + step)
+    }
+    fun setSequenceRounds(value: Int) = edit { it.copy(sequenceRounds = value) }
+    fun setSequenceGap(value: Int) = edit { it.copy(sequenceGapSec = value) }
+
+    /**
+     * Runs the plan: each step with the settings above, round after round, a failed step logged and passed
+     * over rather than ending the sequence — one refused connection in an hour-long drive is a data point.
+     */
+    fun startSequence() {
+        val first = mutableState.value
+        if (!first.canStartSequence) return
+        val plan = first.plan
+        val startedAt = System.currentTimeMillis()
+        mutableState.update { it.copy(running = true, result = null, error = null, sequenceStartedAtMs = startedAt) }
+        job = viewModelScope.launch {
+            try {
+                var index = 0
+                while (true) {
+                    val (round, step) = plan.at(index) ?: break
+                    if (plan.startsRound(index) && plan.gapSec > 0) {
+                        for (left in plan.gapSec downTo 1) {
+                            mutableState.update { it.copy(sequence = SequenceProgress(round, plan.rounds, step, waitingSec = left)) }
+                            delay(1_000)
+                        }
+                    }
+                    val settings = mutableState.value
+                    val s = when (step) {
+                        SequenceStep.PING -> settings.copy(mode = TrafficMode.PING)
+                        SequenceStep.DOWNLOAD -> settings.copy(mode = settings.sequenceIperf, direction = IperfDirection.DOWNLOAD)
+                        SequenceStep.UPLOAD -> settings.copy(mode = settings.sequenceIperf, direction = IperfDirection.UPLOAD)
+                    }
+                    val slots = if (s.mode == TrafficMode.PING) s.pingCount else s.durationSec
+                    mutableState.update {
+                        it.copy(
+                            sequence = SequenceProgress(round, plan.rounds, step),
+                            samples = emptyList(),
+                            sampled = SampledRun(s.mode, slots),
+                            error = null,
+                        )
+                    }
+                    val outcome = try {
+                        when (s.mode) {
+                            TrafficMode.PING -> runPing(s)
+                            TrafficMode.IPERF3, TrafficMode.IPERF2 -> runIperf(s)
+                        } ?: failed(s, mutableState.value.error ?: text(R.string.traffic_no_bearer))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed(s, describe(e, s))
+                    }
+                    mutableState.update {
+                        it.copy(
+                            result = outcome.takeIf { r -> r !is TrafficResult.Failed } ?: it.result,
+                            history = (listOf(outcome) + it.history).take(HISTORY_MAX_SEQUENCE),
+                        )
+                    }
+                    index++
+                }
+            } finally {
+                mutableState.update { it.copy(running = false, sequence = null) }
+            }
+        }
+    }
+
+    private fun failed(s: TrafficUiState, message: String) = TrafficResult.Failed(
+        finishedAtMs = System.currentTimeMillis(),
+        test = when (s.mode) {
+            TrafficMode.PING -> "ping"
+            TrafficMode.IPERF2 -> "iperf2"
+            TrafficMode.IPERF3 -> "iperf3"
+        },
+        host = s.host,
+        message = message,
+    )
+
+    /** The results on screen as a CSV file under the shareable exports directory. */
+    fun exportCsv(): java.io.File? {
+        val results = mutableState.value.history
+        if (results.isEmpty()) return null
+        val dir = java.io.File(getApplication<Application>().cacheDir, com.fieldtap.ui.common.FileSharer.EXPORTS_DIR)
+        if (!dir.isDirectory && !dir.mkdirs()) return null
+        dir.listFiles()?.filter { it.name.startsWith(CSV_PREFIX) }?.forEach { it.delete() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }.format(java.util.Date())
+        return java.io.File(dir, "$CSV_PREFIX$stamp.csv").apply { writeText(TrafficCsv.of(results), Charsets.UTF_8) }
     }
     fun setProtocol(value: IperfProtocol) = edit { it.copy(protocol = value) }
     fun setDirection(value: IperfDirection) = edit { it.copy(direction = value) }
@@ -178,7 +298,7 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         running = false,
                         result = result,
-                        history = if (result != null) (listOf(result) + it.history).take(HISTORY_MAX) else it.history,
+                        history = if (result != null) (listOf(result) + it.history).take(HISTORY_MAX_SEQUENCE) else it.history,
                     )
                 }
             } catch (e: CancellationException) {
@@ -192,7 +312,7 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
 
     fun stop() {
         job?.cancel()
-        mutableState.update { it.copy(running = false) }
+        mutableState.update { it.copy(running = false, sequence = null) }
     }
 
     private suspend fun runIperf(s: TrafficUiState): TrafficResult? {
@@ -304,6 +424,10 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
             .putInt(K_PARALLEL, s.parallel)
             .putString(K_UDP, s.udpMbps)
             .putInt(K_PING_COUNT, s.pingCount)
+            .putString(K_SEQ_STEPS, s.sequenceSteps.joinToString(",") { it.name })
+            .putInt(K_SEQ_ROUNDS, s.sequenceRounds)
+            .putInt(K_SEQ_GAP, s.sequenceGapSec)
+            .putString(K_SEQ_IPERF, s.sequenceIperf.name)
             .apply()
     }
 
@@ -320,6 +444,12 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
             parallel = prefs.getInt(K_PARALLEL, d.parallel),
             udpMbps = prefs.getString(K_UDP, d.udpMbps) ?: d.udpMbps,
             pingCount = prefs.getInt(K_PING_COUNT, d.pingCount),
+            sequenceSteps = prefs.getString(K_SEQ_STEPS, null)
+                ?.split(',')?.mapNotNull { name -> SequenceStep.entries.firstOrNull { it.name == name } }?.toSet()
+                ?: d.sequenceSteps,
+            sequenceRounds = prefs.getInt(K_SEQ_ROUNDS, d.sequenceRounds),
+            sequenceGapSec = prefs.getInt(K_SEQ_GAP, d.sequenceGapSec),
+            sequenceIperf = enumOr(prefs.getString(K_SEQ_IPERF, null), d.sequenceIperf).takeIf { it != TrafficMode.PING } ?: d.sequenceIperf,
         )
     }
 
@@ -334,8 +464,15 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
         const val K_PARALLEL = "parallel"
         const val K_UDP = "udp_mbps"
         const val K_PING_COUNT = "ping_count"
+        const val K_SEQ_STEPS = "sequence_steps"
+        const val K_SEQ_ROUNDS = "sequence_rounds"
+        const val K_SEQ_GAP = "sequence_gap"
+        const val K_SEQ_IPERF = "sequence_iperf"
         const val PING_TIMEOUT_MS = 2_000L
-        const val HISTORY_MAX = 20
+
+        /** A sequence keeps more: an hour at one round a minute is 180 tests, and the CSV wants them all. */
+        const val HISTORY_MAX_SEQUENCE = 500
+        const val CSV_PREFIX = "traffic-"
 
         inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =
             enumValues<E>().firstOrNull { it.name == name } ?: default
