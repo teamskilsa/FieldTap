@@ -19,7 +19,8 @@ public enum Qdss {
         for (i, url) in chunks.enumerated() {
             try Task.checkCancellation()
             let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            data.withUnsafeBytes { deframer.feedChunk($0) }
+            let sequence = Self.sequence(of: url.lastPathComponent)
+            data.withUnsafeBytes { deframer.feedChunk($0, sequence: sequence) }
             progress?(i + 1, chunks.count)
         }
         return deframer.finish()
@@ -27,6 +28,13 @@ public enum Qdss {
 
     /// "0x0000006F.bin" (the Python's glob '0x*.bin').
     static func isChunkName(_ leaf: String) -> Bool { leaf.hasPrefix("0x") && leaf.hasSuffix(".bin") }
+
+    /// The chunk's number in the ring ("0x000061D7.bin" -> 0x61D7), so the deframer sees a missing file as the
+    /// gap in the stream it is. Nil when the name is not a plain hexadecimal chunk name.
+    static func sequence(of leaf: String) -> Int? {
+        guard isChunkName(leaf) else { return nil }
+        return Int(leaf.dropFirst(2).dropLast(4), radix: 16)
+    }
 
     /// Writes `records` as a .qmdl (one HDLC frame per log packet) and returns its size and md5.
     ///

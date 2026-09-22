@@ -45,7 +45,7 @@ import FTModel
         // Told once: the failed setup's own answer is the reject.
         let failures = j.findings.filter { $0.kind == .failure }
         #expect(failures.count == 1)
-        #expect(failures.first?.text == "RRC Connection rejected on B66 PCI 80 after 50 ms at 0:00.150.")
+        #expect(failures.first?.text == "RRC Connection rejected on B66 PCI 80 after 50.0 ms at 0:00.150.")
         let rrc = j.tiles.first { $0.id == "rrcSetup" }
         #expect(rrc?.succeeded == 0 && rrc?.attempts == 1)
     }

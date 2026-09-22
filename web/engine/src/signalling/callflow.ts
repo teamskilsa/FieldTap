@@ -155,6 +155,22 @@ function build(records: [number, LogRecord][], count: number, crcErrors: number,
       isHandoverCommand: fields.some((f) => f.label === HANDOVER),
     };
   });
+  return flowOf(events, [...cellDetails.values()], {
+    records: count,
+    undecoded,
+    crcErrors,
+    durationMs: timeBase.durationMs,
+    startUtcMs: utcMs(firstRaw),
+  });
+}
+
+/** The rest of a Flow from its events: procedures, moves, connections and the cells only searched. Split out of
+ *  build() so a synthetic flow (tools/make-sample.ts) follows the same rules as a decoded capture. */
+export function flowOf(
+  events: FlowEvent[],
+  cellDetails: { cell: Cell; info: ServingCellInfo }[],
+  counts: { records: number; undecoded: number; crcErrors: number; durationMs: number; startUtcMs: number | null },
+): Flow {
   const steps = journey(events).map((step) => ({ ...step, event: firstOnCell(events, step) }));
   const visited = new Set(steps.map((s) => cellKey(s.to)));
   const searched = new Map<string, Cell>();
@@ -169,12 +185,8 @@ function build(records: [number, LogRecord][], count: number, crcErrors: number,
     journey: steps,
     searched: [...searched.values()],
     connections: connections(events),
-    cellDetails: [...cellDetails.values()],
-    records: count,
-    undecoded,
-    crcErrors,
-    durationMs: timeBase.durationMs,
-    startUtcMs: utcMs(firstRaw),
+    cellDetails,
+    ...counts,
     failures: events.filter((e) => e.isFailure).length,
   };
 }

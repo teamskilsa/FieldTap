@@ -61,10 +61,16 @@ final class PeakMeter: @unchecked Sendable {
     /// compared stat, the secure census, the trace directory, no problems, under a minute (Release), the scratch
     /// folder gone and never over 200 MB. Skipped on the simulator by design: its Debug build of a 124 MB deframe
     /// takes minutes and the macOS run already covers the same code.
-    @Test(.fixture("sysdiagnose"), .fixture("qdss-full-stats.json"),
+    /// Gated on the archive itself: the .tar.gz is not kept on this Mac for ever (it is 408 MB and the disk is
+    /// small), and a test that cannot read it should say which file it wants, not fail. The deframer parity it
+    /// checks is also checked from the extracted chunks by `fullCaptureChunksMatchPython`, which survives the
+    /// archive.
+    @Test(.enabled(if: Fixtures.sysdiagnose != nil,
+                   "needs the 2026-09-21 15-41-47 sysdiagnose archive (FT_SYSDIAGNOSE)"),
+          .fixture("qdss-full-stats.json"),
           .disabled(if: UserArchives.onSimulator, "the full sysdiagnose runs on macOS (swift test), not the simulator"))
     func fullSysdiagnose() async throws {
-        guard let archive = Fixtures.require("sysdiagnose"), let statsURL = Fixtures.require("qdss-full-stats.json") else {
+        guard let archive = Fixtures.sysdiagnose, let statsURL = Fixtures.require("qdss-full-stats.json") else {
             return
         }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ft-wp3-full-\(UUID().uuidString)")
@@ -114,6 +120,75 @@ final class PeakMeter: @unchecked Sendable {
         #if !DEBUG
         #expect(elapsed < 60, "import took \(elapsed) s")
         #endif
+    }
+
+    /// The whole 2026-09-21 capture straight from its 130 extracted chunk files: the same md5 and the same
+    /// stats as qdss_deframe.py, with the resync code in place. The stream never loses sync (no bad-type unit
+    /// in 7.7 M, no gap in the chunk numbering), so resync must not touch a byte of it; this is the test that
+    /// says so now that the archive itself may be gone.
+    @Test(.chunks(CaptureChunks.first, "the 2026-09-21 15-41-47 capture"), .fixture("qdss-full-stats.json"),
+          .disabled(if: CaptureChunks.onSimulator, "the 124 MB deframe runs on macOS (swift test)"))
+    func fullCaptureChunksMatchPython() throws {
+        guard let dir = CaptureChunks.first, let statsURL = Fixtures.require("qdss-full-stats.json") else { return }
+        let files = CaptureChunks.files(dir)
+        #expect(files.count == 130)
+        let out = try Qdss.deframe(chunkFiles: files)
+        let qmdl = DeframerParityTests.temp("iphone-recovered.qmdl")
+        defer { try? FileManager.default.removeItem(at: qmdl) }
+        let written = try Qdss.writeQmdl(out.records, to: qmdl)
+        #expect(written.md5 == "e53a167b29b25560938d1f089e719d33")
+        #expect(out.records.count == 92_133)
+        let expected = try DeframerParityTests.json(statsURL)
+        try DeframerParityTests.expectStats(out.stats, equal: expected, keys: DeframeStats.comparedKeys)
+        try DeframerParityTests.expectStats(out.stats, equal: expected, keys: ["incomplete_records", "targets", "top_codes"])
+        // Nothing resynced: the counters that only resync writes are absent.
+        #expect(out.stats.counters["resyncs"] == nil && out.stats.counters["chunk_gaps"] == nil)
+        #expect(out.stats.counters["resync_dropped_fragments"] == nil && out.stats.counters["u_badtype"] == nil)
+    }
+
+    /// The 2026-09-22 capture, taken while moving: three chunk files listed in info.txt are missing from the
+    /// archive and the stream also slips inside a chunk, so one fixed phase recovers less than a quarter of it.
+    /// With resync the whole trace comes back, and every record is complete.
+    @Test(.chunks(CaptureChunks.second, "the 2026-09-22 08-57-25 capture"),
+          .disabled(if: CaptureChunks.onSimulator, "the 128 MB deframe runs on macOS (swift test)"))
+    func secondCaptureResyncsThroughTheGaps() throws {
+        guard let dir = CaptureChunks.second else { return }
+        let files = CaptureChunks.files(dir)
+        let numbers = files.compactMap { Qdss.sequence(of: $0.lastPathComponent) }
+        let missing = numbers.isEmpty ? 0 : (numbers.max()! - numbers.min()! + 1) - numbers.count
+        let out = try Qdss.deframe(chunkFiles: files)
+        print("secondCapture: \(files.count) chunks, \(missing) missing, \(out.records.count) records, "
+              + "\(out.stats.distinctCodes) codes, \(out.stats.incompleteRecords) incomplete, "
+              + "counters \(out.stats.counters.filter { $0.key.hasPrefix("resync") || $0.key == "chunk_gaps" || $0.key == "u_badtype" })")
+        #expect(missing == 3)
+        #expect(out.stats.counters["chunk_gaps"] == 3)
+        #expect((out.stats.counters["resyncs"] ?? 0) >= 1)
+        #expect(out.records.count >= 80_000, "\(out.records.count) records")
+        #expect(out.stats.distinctCodes >= 200)
+        #expect(out.stats.incompleteRecords == 0)
+        try writeFixture(out, chunks: files.count, dir: dir)
+    }
+
+    /// With FT_CAPTURE2_FIXTURE_OUT set, the recovered capture is written there as a -FTFixture folder (a .qmdl
+    /// plus the trace's own info.txt and name), so the harness can screenshot this capture without an archive.
+    /// Nothing is written otherwise, and never inside the repo except under the git-ignored Fixtures/local.
+    func writeFixture(_ out: DeframeOutput, chunks: Int, dir: URL) throws {
+        guard let path = UserArchives.env("FT_CAPTURE2_FIXTURE_OUT") else { return }
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: path, isDirectory: true)
+        try fm.createDirectory(at: root.appendingPathComponent("baseband-meta"), withIntermediateDirectories: true)
+        _ = try Qdss.writeQmdl(out.records, to: root.appendingPathComponent("capture2.qmdl"))
+        try JSONEncoder().encode(out.stats).write(to: root.appendingPathComponent("qdss-full-stats.json"))
+        let name = CaptureChunks.secondName + ".tar.gz"
+        try name.write(to: root.appendingPathComponent("baseband-meta/archive-name.txt"), atomically: true, encoding: .utf8)
+        try dir.lastPathComponent.write(to: root.appendingPathComponent("baseband-meta/trace-dir-name.txt"),
+                                        atomically: true, encoding: .utf8)
+        // info.txt alone: FixtureLoader reads the listing from it, and trace.info is not used.
+        for leaf in ["info.txt"] where fm.fileExists(atPath: dir.appendingPathComponent(leaf).path) {
+            try? fm.removeItem(at: root.appendingPathComponent("baseband-meta/" + leaf))
+            try fm.copyItem(at: dir.appendingPathComponent(leaf), to: root.appendingPathComponent("baseband-meta/" + leaf))
+        }
+        print("secondCapture: wrote a -FTFixture folder to \(root.path)")
     }
 
     /// The user's 14:39 archive, taken before the profile was installed: 'Modem logging is off' and no trace.

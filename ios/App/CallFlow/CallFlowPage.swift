@@ -210,6 +210,8 @@ private struct LadderList: View {
                 .padding(.bottom, 12)
             }
             .scrollDismissesKeyboard(.immediately)
+            // Room under the last message for the floating cursor bar (CapturePageLayout).
+            .contentMargins(.bottom, CapturePageLayout.scrollBottomInset, for: .scrollContent)
             .background {
                 CursorFollower(ladder: ladder, session: session, memo: memo, highlight: highlight, proxy: proxy,
                                jumpToken: jumpToken)

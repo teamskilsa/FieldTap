@@ -69,12 +69,16 @@
      },
      "markerCount": 13,
      "eventCount": 128,
-     "procedureCount": 34
+     "procedureCount": 34,
+     "bottomInset": 28
     },
     "captureId": {
      "$present": true
     },
-    "cursorMs": 0
+    "cursorMs": {
+     "$approx": 725.813,
+     "tol": 0.01
+    }
    }
   },
   {
@@ -96,7 +100,8 @@
       "event-2",
       "event-3"
      ],
-     "eventCount": 128
+     "eventCount": 128,
+     "bottomInset": 28
     },
     "captureId": {
      "$present": true
@@ -244,7 +249,8 @@
       35
      ],
      "chartCount": 7,
-     "versionMisses": 0
+     "versionMisses": 0,
+     "bottomInset": 28
     },
     "captureId": {
      "$present": true

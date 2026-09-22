@@ -40,6 +40,8 @@ struct RadioPage: View {
                 }
             }
         }
+        // Room under the last chart for the floating cursor bar (CapturePageLayout).
+        .contentMargins(.bottom, CapturePageLayout.scrollBottomInset, for: .scrollContent)
         .onAppear { if session.radioSection == nil { session.radioSection = Section.signal.rawValue } }
         .accessibilityIdentifier("radioPage")
     }

@@ -121,7 +121,9 @@ import FTTestSupport
         #expect(JourneyText.clock(13_798.721) == "0:13.799")
         #expect(JourneyText.clock(118_315.744) == "1:58.316")
         #expect(JourneyText.shortClock(46_800) == "0:46")
-        #expect(JourneyText.duration(43.699) == "44 ms" && JourneyText.duration(12_700) == "12.7 s")
+        // JourneyText.duration is CallFlowPresentation.duration's rule now: one decimal under 100 ms.
+        #expect(JourneyText.duration(43.699) == "43.7 ms" && JourneyText.duration(12_700) == "12.7 s")
+        #expect(JourneyText.duration(334.816) == "335 ms" && JourneyText.duration(1_240) == "1.24 s")
         #expect(JourneyText.seconds(560.909) == "0.56 s")
         #expect(JourneyText.distance(1_406.2) == "1.4 km" && JourneyText.distance(780) == "780 m")
         #expect(JourneyText.count(23_764) == "23,764" && JourneyText.count(999) == "999")

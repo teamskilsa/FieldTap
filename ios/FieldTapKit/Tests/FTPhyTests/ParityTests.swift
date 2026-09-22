@@ -91,6 +91,9 @@ import FTTestSupport
         #expect(s.nr.b887Records == 497 && s.nr.b887CrcFail == 27 && s.nr.b887PassBytes == 653_592, "\(s.nr)")
         #expect(s.nr.deltaDecodes == 497 && s.nr.deltaCrcFail == 27 && s.nr.deltaPassBytes == 653_592, "\(s.nr)")
         #expect(s.nrTbs.matched == 472 && s.nrTbs.retx == 25 && s.nrTbs.unexplained == 0, "\(s.nrTbs)")
+        // Every one of the 497 transport blocks is accounted for, and none of them needs the wider fields the
+        // second capture forced on 0xB887 (FTAppTests covers that side): 497 -> 497 either way.
+        #expect(s.nrTbs.matched + s.nrTbs.retx == s.nr.b887Records, "\(s.nrTbs) of \(s.nr.b887Records)")
         #expect(s.macSamples == 4537 && s.macConsistent == 4537)
         let checks = l.run.capture.checks
         #expect(Set(checks.map(\.id)) == ["b193RsrqIdentity", "b173TbsTable", "b139TbsModulation", "b887TbsFormula",

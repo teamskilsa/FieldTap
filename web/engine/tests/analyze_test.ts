@@ -2,12 +2,12 @@
 // facts and the CaptureAnalysis shape only: they keep passing as the qdss, signalling and phy-journey agents land.
 
 import { analyzeArchive } from '../src/analyze.ts';
-import { analyzeFile } from '../src/index.ts';
+import { analyzeFile, forgetCapture, revealIdentifiers } from '../src/index.ts';
 import { CONTRACT_VERSION, type CaptureAnalysis, type ImportProgress } from '../src/types.ts';
 import type { WorkerReply, WorkerRequest } from '../src/worker.ts';
-import { archive, gate, REAL } from '../tools/fixtures.ts';
+import { captureSource, gateCapture, REAL } from '../tools/fixtures.ts';
 import { assert, assertEquals, assertRejects } from './assert.ts';
-import { buildTar, gzip, streamOf, type TarSpec } from './support.ts';
+import { buildTar, gzip, openCapture, streamOf, type TarSpec } from './support.ts';
 
 const ROOT = 'sysdiagnose_2026.09.21_15-41-47-0400_iPhone-OS_iPhone_23F84';
 const QDSS = `${ROOT}/logs/Baseband/log-bb-2026-09-21-15-42-33-844-qdss`;
@@ -158,26 +158,40 @@ Deno.test('worker.ts + index.ts: analyzeFile runs the analysis in a Web Worker a
     };
     w.postMessage({ type: 'analyze', file: gz.slice().buffer, fileName: file.name } satisfies WorkerRequest);
   });
+  // 'reveal' answers from the same worker; this archive's synthetic chunks hold no call flow, so there is none.
+  const revealed = await new Promise<WorkerReply>((resolve) => {
+    w.onmessage = (e: MessageEvent<WorkerReply>) => resolve(e.data);
+    w.postMessage({ type: 'reveal' } satisfies WorkerRequest);
+  });
+  assertEquals(revealed, { type: 'revealed', signalling: null });
+  w.postMessage({ type: 'forget' } satisfies WorkerRequest);
   w.terminate();
   assertEquals(replies.at(-1), 'done');
   assert(replies.slice(0, -1).every((r) => r === 'progress'));
+
+  // The analysing worker is kept for revealIdentifiers, and forgetCapture ends it (Deno fails the test on a
+  // worker left running).
+  await analyzeFile(file, () => {}, undefined, makeWorker);
+  assertEquals(await revealIdentifiers(), null);
+  forgetCapture();
+  assertEquals(await revealIdentifiers(), null, 'nothing kept after forgetCapture');
 });
 
-const FIRST = archive(REAL.first);
+const FIRST = REAL.first;
 
 Deno.test({
   name: 'analyzeArchive on the first real capture: the archive facts, early stop, a complete plain-data shape',
-  ignore: gate(FIRST),
+  ignore: gateCapture(FIRST),
   fn: async () => {
-    const file = await Deno.open(FIRST);
-    const size = (await Deno.stat(FIRST)).size;
+    const { stream, totalBytes } = openCapture(captureSource(FIRST)!);
     const progress: ImportProgress[] = [];
-    const a = await analyzeArchive(file.readable, (p) => progress.push(p), undefined, { fileName: REAL.first, totalBytes: size, nowMs: PRESS });
+    const a = await analyzeArchive(stream, (p) => progress.push(p), undefined, { fileName: REAL.first, totalBytes, nowMs: PRESS });
     assertShape(a);
     assertEquals(a.triggerTime, '2026-09-21T19:41:47.000Z');
     assertEquals([a.traceWindow?.afterPressStartS, a.traceWindow?.afterPressEndS, a.traceWindow?.filesKept, a.traceWindow?.filesOnPhone], [19, 46.844, 130, 241]);
     assertEquals([a.profile.status, a.guide.status, a.guide.daysLeft], ['active', 'active', 6]);
     assertEquals(a.problems.filter((p) => p.kind !== 'unsupportedTrace'), []);
+    assert(a.events.every((e) => e.pduHex === undefined), 'masked by default: no PDU bytes');
     const reading = progress.filter((p) => p.stage === 'reading');
     assert(reading.at(-1)!.fraction < 0.5, `early stop: reading ended at ${(reading.at(-1)!.fraction * 100).toFixed(0)}% of the file`);
   },

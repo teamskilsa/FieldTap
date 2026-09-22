@@ -124,16 +124,17 @@ struct ModemLoggingGuideView: View {
     }
 }
 
-/// Why press first, and what the newest capture covered (R2). The numbers come from one capture; it says so.
+/// Why press first, and what the newest capture covered (R2). The advice is `CaptureWording.timing`, the one
+/// place the timing is written down; the numbers come from two captures, and it says so.
 struct TimingNote: View {
     var latest: CaptureSummary?
 
-    static let short = "Press first, then make the problem happen 20 to 40 seconds later: in early tests your iPhone kept only about 27 seconds of modem trace, from 19 to 46 seconds after the press."
+    static let short = CaptureWording.timing
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Why press first?", systemImage: "timer").font(.headline)
-            Text("Your iPhone keeps only a short stretch of modem trace: about 27 seconds in our early tests, from about 19 to 46 seconds after the press, and almost nothing from before it. So press first, then make the problem happen 20 to 40 seconds later.")
+            Text(CaptureWording.timing)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
             if let w = latest?.traceWindowAfterPressMs {
@@ -143,7 +144,8 @@ struct TimingNote: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("lastTraceWindow")
             }
-            Text("These timings are based on early tests and may change.")
+            Text("Your iPhone writes the modem log out about 19 seconds after the press and keeps only the last "
+                 + "20 to 30 seconds of it. These timings come from two captures and may change.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

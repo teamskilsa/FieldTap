@@ -36,12 +36,20 @@ public struct DeframeOutput: Hashable, Sendable {
     }
 }
 
-/// Streaming Swift port of qdss_deframe.py (default verified rules).
+/// Streaming Swift port of qdss_deframe.py (default verified rules), plus resync, which the Python has not.
 ///
 /// Feed each chunk's bytes in ascending chunk-name order, in any split (`feed`), and call `endChunk()` after
 /// each chunk: layer 1's 16-byte frames are aligned to the start of every chunk, so a chunk's tail shorter than
 /// 16 bytes is dropped there. `feedChunk` does both for a whole chunk. `finish()` once at the end. The output
 /// does not depend on how a chunk is split into `feed` calls.
+///
+/// **Resync.** The Python picks one unit phase from the head of the stream and keeps it to the end, which only
+/// works while the stream is whole. Two things break that, and both happen in a capture whose ring buffer was
+/// still being written: a chunk file missing from the archive takes an unknown number of bytes out of the
+/// stream, and the trace itself can slip mid-chunk. So this deframer re-finds the phase whenever
+/// `resyncAfterBadUnits` units in a row fail the tag check, and, when `feedChunk(_:sequence:)` reports a gap in
+/// the chunk numbering, drops the per-lane state and re-finds the phase at the new chunk. A stream that never
+/// loses sync is deframed exactly as the Python does it, byte for byte, because neither path is ever taken.
 ///
 /// Memory stays bounded by the open fragments, the first 320,031 stream bytes (until the phase is known) and
 /// the records themselves; the 124 MB layer-1 stream of a full capture is never held.
@@ -53,6 +61,13 @@ public struct QdssDeframer: Sendable {
     /// find_phase scans i in [p, min(len - 16, p + 320_000)) for every p < 16; with this many bytes buffered
     /// the bound no longer depends on the length, so the phase equals the Python's on the whole stream.
     static let phaseBytes = phaseSample + 31
+    /// Units in a row whose tag is none of fill, channel, start or continuation before the phase is re-found.
+    /// A unit at a wrong phase passes the check with probability 4/32, so eight in a row is the stream telling
+    /// us it is no longer where we think it is; a single stray unit (the capture has none in 7.7 M) is not.
+    static let resyncAfterBadUnits = 8
+    /// Bytes gathered before the phase is re-found (4,000 units): enough for find_phase to lock on again,
+    /// small enough that a resync costs no data, since the buffer is scanned at the phase it decides on.
+    static let resyncBytes = 16 * 4_000 + 31
 
     // Layer 1.
     private var frame: [UInt8] = []
@@ -62,12 +77,22 @@ public struct QdssDeframer: Sendable {
     private var chunkOpen = false
     private var streamBytes = 0
     private var layer1Out: [UInt8] = []
+    /// The number in the last chunk's name, when the caller gave one.
+    private var lastSequence: Int?
 
     // Layer 2.
     private var phase: Int?
+    /// The phase the stream started on: what the Python reports, and what the stats keep.
+    private var firstPhase: Int?
     private var head: [UInt8] = []
+    /// Bytes `head` must hold before the phase is decided: the Python's sample at the start, the shorter
+    /// resync sample afterwards.
+    private var headTarget = phaseBytes
     private var unit: [UInt8] = []
     private var skip = 0
+    /// Units in a row that failed the tag check, and the resync they ask for.
+    private var badRun = 0
+    private var needsResync = false
     /// Lane (u0 >> 5) -> bound channel; -1 is unbound (the Python's key None).
     private var lanes = [Int32](repeating: -1, count: 8)
     private var open: [Int32: OpenFragment] = [:]
@@ -99,6 +124,8 @@ public struct QdssDeframer: Sendable {
     private struct Counts: Sendable {
         var uFill = 0, uChan = 0, uStart = 0, uCont = 0, uContOrphan = 0, uBadType = 0, qshrinkF3 = 0
         var messages = 0, messagesUnterm = 0, messagesIncomplete = 0, gatherFlushed = 0, gatherLeftOpen = 0
+        /// Resync: phases re-found mid-stream, chunk-sequence gaps, and the fragments dropped at both.
+        var resyncs = 0, chunkGaps = 0, resyncDropped = 0
         var extra: [String: Int] = [:]
         var fitsExact = 0, fitsShort = 0, fitsExtraUnits = 0, fitsCountMismatch = 0
         var kinds = [Int](repeating: 0, count: 16)
@@ -158,6 +185,75 @@ public struct QdssDeframer: Sendable {
         endChunk()
     }
 
+    /// One whole chunk, with the number in its name ("0x000061D7.bin" -> 0x61D7). When that number is not the
+    /// previous one plus 1, bytes are missing from the stream: the formatter's ATID, the lane bindings, the
+    /// open fragments and the unit phase all belong to the stream before the gap, so they are dropped and the
+    /// phase is found again on the new chunk. With no gap this is `feedChunk` exactly.
+    public mutating func feedChunk(_ bytes: UnsafeRawBufferPointer, sequence: Int?) {
+        if let sequence, let last = lastSequence, sequence != last + 1 {
+            counts.chunkGaps += 1
+            breakStream()
+        }
+        lastSequence = sequence
+        feedChunk(bytes)
+    }
+
+    public mutating func feedChunk(_ bytes: [UInt8], sequence: Int?) {
+        bytes.withUnsafeBytes { feedChunk($0, sequence: sequence) }
+    }
+
+    /// A gap in the stream: finish what is buffered, then forget everything that describes where we are.
+    private mutating func breakStream() {
+        if chunkOpen { endChunk() }
+        decidePhase(flush: true)
+        currentId = -1
+        frame.removeAll(keepingCapacity: true)
+        breakFragments()
+        phase = nil
+        head.removeAll(keepingCapacity: true)
+        headTarget = Self.resyncBytes
+        unit.removeAll(keepingCapacity: true)
+        skip = 0
+        badRun = 0
+        needsResync = false
+    }
+
+    /// What was open when the stream broke. A fragment waits for the next start unit on its channel, so the one
+    /// sitting there is often already whole: those are closed as usual, and so are the gathered runs, the way
+    /// `finish()` closes them. Only what the lost bytes actually cut in half is dropped, which is why a resync
+    /// adds no incomplete records. The lane bindings go either way: after the break we do not know what a lane
+    /// carries.
+    private mutating func breakFragments() {
+        let stillOpen = open.sorted { $0.value.order < $1.value.order }
+        open.removeAll(keepingCapacity: true)
+        for (key, f) in stillOpen {
+            if Self.fragmentIsComplete(f.units) {
+                close(f.units, key: key)
+            } else {
+                counts.resyncDropped += 1
+            }
+        }
+        let runs = pending.sorted { $0.value.order < $1.value.order }
+        pending.removeAll(keepingCapacity: true)
+        for (key, p) in runs {
+            if p.complete {
+                counts.gatherFlushed += 1
+                emit(p.data, complete: true, key: key, unterminated: true)
+            } else {
+                counts.resyncDropped += 1
+            }
+        }
+        for i in lanes.indices { lanes[i] = -1 }
+    }
+
+    /// True when every byte the fragment's length field promises arrived.
+    static func fragmentIsComplete(_ units: [UInt8]) -> Bool {
+        guard units.count >= 16 else { return false }
+        let pad = Int((units[1] >> 4) & 7)
+        let length = Int(units[2]) | Int(units[3]) << 8
+        return consumption(length: length, pad: pad, conts: (units.count - 16) / 16).complete
+    }
+
     // MARK: Layer 1 (deformat)
 
     @inline(__always)
@@ -203,19 +299,40 @@ public struct QdssDeframer: Sendable {
         streamBytes += p.count
         if phase == nil {
             head.append(contentsOf: p)
-            if head.count >= Self.phaseBytes { decidePhase() }
-            return
+        } else {
+            units(p)
         }
-        units(p)
+        decidePhase()
     }
 
-    private mutating func decidePhase() {
-        let h = head
-        head = []
-        let p = h.withUnsafeBufferPointer { Self.findPhase($0) }
-        phase = p
-        skip = p
-        h.withUnsafeBufferPointer { units($0) }
+    /// Decides the phase from the buffered head and runs the head through it. `units` may lose sync inside that
+    /// buffer and refill the head, so this repeats while there is enough to decide on again (`flush`: while
+    /// there is anything at all). Each round drops at least the bad run, so it always ends.
+    private mutating func decidePhase(flush: Bool = false) {
+        while phase == nil && (flush ? !head.isEmpty : head.count >= headTarget) {
+            let h = head
+            head = []
+            let p = h.withUnsafeBufferPointer { Self.findPhase($0) }
+            phase = p
+            if firstPhase == nil { firstPhase = p }
+            skip = p
+            h.withUnsafeBufferPointer { units($0) }
+        }
+    }
+
+    /// Sync lost at `i` in the current buffer: drop what was open and buffer the rest of the stream for a new
+    /// phase. The bad units themselves are not kept: they are the bytes we could not read.
+    private mutating func resync(_ base: UnsafePointer<UInt8>, from i: Int, of n: Int) {
+        counts.resyncs += 1
+        needsResync = false
+        badRun = 0
+        breakFragments()
+        phase = nil
+        skip = 0
+        unit.removeAll(keepingCapacity: true)
+        headTarget = Self.resyncBytes
+        head.removeAll(keepingCapacity: true)
+        if i < n { head.append(contentsOf: UnsafeBufferPointer(start: base + i, count: n - i)) }
     }
 
     /// find_phase: the p in 0..<16 with the most plausible unit headers; the first maximum wins.
@@ -261,11 +378,13 @@ public struct QdssDeframer: Sendable {
                 let u = unit
                 unit.removeAll(keepingCapacity: true)
                 u.withUnsafeBufferPointer { handleUnit($0.baseAddress!) }
+                if needsResync { return resync(base, from: i, of: p.count) }
             }
         }
         while i + 16 <= p.count {
             handleUnit(base + i)
             i += 16
+            if needsResync { return resync(base, from: i, of: p.count) }
         }
         if i < p.count { unit.append(contentsOf: UnsafeBufferPointer(start: base + i, count: p.count - i)) }
     }
@@ -279,6 +398,14 @@ public struct QdssDeframer: Sendable {
     private mutating func handleUnit(_ u: UnsafePointer<UInt8>) {
         let t = u[0] & 0x1F
         let lane = Int(u[0] >> 5)
+        if t == 0x00 || t == 0x02 || t == 0x03 || t == 0x13 {
+            badRun = 0
+        } else {
+            counts.uBadType += 1
+            badRun += 1
+            if badRun >= Self.resyncAfterBadUnits { needsResync = true }
+            return
+        }
         switch t {
         case 0x00:
             counts.uFill += 1
@@ -299,7 +426,7 @@ public struct QdssDeframer: Sendable {
                 counts.uContOrphan += 1
             }
         default:
-            counts.uBadType += 1
+            break                                               // the tag check above has taken every other tag
         }
     }
 
@@ -564,7 +691,7 @@ public struct QdssDeframer: Sendable {
     /// and returns the records in effective-timestamp order with the Python's stats. Call once.
     public mutating func finish() -> DeframeOutput {
         if chunkOpen { endChunk() }
-        if phase == nil { decidePhase() }
+        decidePhase(flush: true)
         unit.removeAll()
         let stillOpen = open.sorted { $0.value.order < $1.value.order }
         open = [:]
@@ -598,7 +725,7 @@ public struct QdssDeframer: Sendable {
     }
 
     private func stats(ts: [String: Int]) -> DeframeStats {
-        var s: [String: Int] = ["phase": phase ?? 0]
+        var s: [String: Int] = ["phase": firstPhase ?? phase ?? 0]
         func put(_ name: String, _ v: Int) { if v > 0 { s[name] = v } }
         put("u_fill", counts.uFill)
         put("u_chan", counts.uChan)
@@ -612,6 +739,9 @@ public struct QdssDeframer: Sendable {
         put("messages_incomplete", counts.messagesIncomplete)
         put("gather_flushed_unterminated", counts.gatherFlushed)
         put("gather_left_open", counts.gatherLeftOpen)
+        put("resyncs", counts.resyncs)
+        put("chunk_gaps", counts.chunkGaps)
+        put("resync_dropped_fragments", counts.resyncDropped)
         for (k, v) in counts.extra { put(k, v) }
 
         var fits: [String: Int] = [:]

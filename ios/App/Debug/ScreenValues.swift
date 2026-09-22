@@ -81,6 +81,7 @@ enum ScreenValues {
             "procedureCount": n(s.analysis.flow.procedures.count),
             "scellsAtCursor": n(at.count { $0.lane == .scell }),
             "pscellAtCursor": .bool(at.contains { $0.lane == .pscell }),
+            "bottomInset": n(Int(CapturePageLayout.scrollBottomInset)),
         ]
         if let pcell = at.first(where: { $0.lane == .pcell }) { v["pcellBandAtCursor"] = .string(pcell.band ?? "NR") }
         return v
@@ -93,6 +94,7 @@ enum ScreenValues {
             "rowCount": n(rows.count),
             "firstRowIds": .strings(rows.prefix(5).map(\.id)),
             "eventCount": n(s.analysis.flow.events.count),
+            "bottomInset": n(Int(CapturePageLayout.scrollBottomInset)),
         ]
     }
 
@@ -134,6 +136,8 @@ enum ScreenValues {
             }),
             "chartCount": n(series.count { !($0?.samples.isEmpty ?? true) }),
             "versionMisses": n(phy.versionMisses.values.reduce(0, +)),
+            // The room each scrollable page keeps under its last row, so the floating cursor bar cannot cover it.
+            "bottomInset": n(Int(CapturePageLayout.scrollBottomInset)),
         ]
         switch section {
         case "carriers":

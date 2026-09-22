@@ -1,5 +1,5 @@
 // A streaming port of ios/Fixtures/local/reference/qdss_deframe.py, its verified default rules only (demux by
-// channel, reversed last words, gather by kind, one phase for the whole stream, secure logs counted not kept):
+// channel, reversed last words, gather by kind, secure logs counted not kept), plus the resync below:
 //   layer 1  formatter.ts  CoreSight frames -> the ATID-0x32 stream
 //   layer 2  units.ts      16-byte units -> fragments per channel
 //   gather   here          fragments by kind: 1 whole, 2 QShrink F3 (counted), 3 first, 4 middle, 5 last
@@ -7,12 +7,29 @@
 //
 // Usage: for each trace chunk in name order, feed() its bytes in any split, then endChunk(); finish() once. The
 // output does not depend on the split. Nothing is kept of the chunks themselves: layer 1 holds at most a partial
-// frame, layer 2 the first 320,031 bytes until the phase is settled and then less than a unit, so memory is the
-// open fragments plus the records.
+// frame, layer 2 the first 320,031 bytes until the phase is settled and then less than a unit between feeds, so
+// memory is the open fragments plus the records (the first capture: 1.1 M fragments, 92,133 records).
 //
 // Parity: records written with diag/qmdl.ts writeQmdl hash (tools/md5.ts) to the Python's .qmdl md5
 // (qdss-first3 8bee4165..., qdss-attach4 245d59fc..., the whole first capture e53a167b...), and the stats
-// serialise (JSON, indent 1) byte for byte as the Python's stats.json.
+// serialise (JSON, indent 1) byte for byte as the Python's stats.json, except that JS always puts the key '2026'
+// first in `ts` (an integer-like key), where Python keeps first-seen order; on the real traces it is first anyway.
+//
+// Resync (the one rule beyond the reference's defaults). The reference settles one unit phase and keeps it for the
+// whole stream. That holds for a trace whose chunks are all present, but not for one the sysdiagnose collector took
+// files out of: the moving capture (08-57-25) is missing 3 of its 133 segments, and its phase slips 8 times — 3 at
+// the holes and 5 mid-chunk. With one phase it yields 18,667 of its 85,361 records. So layer 2 also:
+//   - re-finds the phase when it loses sync, i.e. RESYNC_RUN consecutive units fail the tag check, scanning
+//     RESYNC_WINDOW bytes from the first unit of the bad run (the reference's own per-4 KB scan, done online);
+//   - re-finds the phase at a chunk-sequence gap too, on the caller's `gap()`.
+// At either break the fragments in flight are closed for what they already hold (their leading bytes were read
+// before the break) rather than thrown away, and the lanes are unbound.
+// It cannot fire on a whole trace: the first capture has no bad unit at all in 5.4 M (qdss-full-stats.json has no
+// u_badtype key), so its md5 and its byte-identical stats are untouched. The resync keys appear in `stats` only
+// when a resync happened, which keeps that parity literal rather than by tolerance.
+//
+// Not ported: the Python's rejected alternatives (--demux lane, --no-reverse, --gather bit0, --per-chunk,
+// --keep-secure) and its atid32.bin cache.
 
 import { hexCode, type LogRecord } from '../diag/record.ts';
 import type { DeframeStats, EncryptedCensus } from '../types.ts';
@@ -77,6 +94,13 @@ const TARGETS = [0xb0c0, 0xb0c1, 0xb0c2, 0xb0e2, 0xb0e3, 0xb0ec, 0xb0ed, 0xb0e4,
 /** A lane that no channel unit has bound: Python's key None. Channel ids are u16, so it cannot collide. */
 const UNBOUND = -1;
 
+/** Consecutive units failing the tag check that mean the phase has slipped, not that one unit is damaged. A
+ *  correctly phased stream has essentially none (the first capture: 0 in 5,411,059), so 8 is already decisive. */
+const RESYNC_RUN = 8;
+/** Bytes scanned to re-find the phase, as the reference's slip hunt scanned per 4 KB. 256 candidate units per
+ *  phase is plenty, and waiting for so few bytes keeps the resync split-invariant. */
+const RESYNC_WINDOW = 4096;
+
 /** ts_ok: the upper half of a 2026 modem timestamp. */
 const plausible = (hi: number) => hi >= 0x01120000 && hi <= 0x0113ffff;
 
@@ -119,6 +143,10 @@ export class QdssDeframer {
   private chunks = 0;
   private fedSinceEnd = false;
   private done = false;
+  /** Stream offset the phase is being re-found from, while a resync waits for its window. */
+  private resync: number | null = null;
+  /** Units failing the tag check in a row, for the resync trigger. */
+  private badRun = 0;
 
   /** Lane -> bound channel. */
   private readonly lanes = new Int32Array(8).fill(UNBOUND);
@@ -159,13 +187,37 @@ export class QdssDeframer {
     this.fedSinceEnd = false;
   }
 
+  /**
+   * Trace files are missing before the next chunk, so the stream jumps: whatever layer 2 was assembling ends here
+   * and the unit phase is re-found after the hole. Call it between endChunk() and the next chunk's feed(); the
+   * caller knows the chunk numbers (0x61BE, 0x61BF, ...), the deframer never sees a file name.
+   */
+  gap(): void {
+    if (this.done) throw new Error('QdssDeframer: gap after finish');
+    this.stats.add('chunk_gaps');
+    // What is buffered belongs to the chunks before the hole, and is a contiguous stream of its own: settle a
+    // phase on it if the window never filled, read it, then start again on the far side.
+    if (this.phase === null) this.settlePhase();
+    this.units(true);
+    // A unit straddling the hole can never be completed.
+    this.queue.start = this.queue.end;
+    this.slipped('gap');
+  }
+
   finish(): DeframeOutput {
     if (this.done) throw new Error('QdssDeframer: finish called twice');
     if (this.fedSinceEnd) this.endChunk();
     this.done = true;
     if (this.phase === null) this.settlePhase();
-    this.units();
-    // The stream ended: fragments still open close in opening order, then what is still gathering is emitted.
+    this.units(true);
+    this.drain();
+    return this.output();
+  }
+
+  /** Nothing more will arrive for the fragments in flight: those still open close in opening order, then what is
+   *  still gathering is emitted. At the end of the stream, and at a resync, where a fragment's leading bytes were
+   *  read before the slip and so are good. */
+  private drain(): void {
     for (const f of this.open.values()) this.closed(f);
     this.open.clear();
     for (const [key, g] of this.gathering) {
@@ -173,7 +225,6 @@ export class QdssDeframer {
       this.emit(g.offset, key, concat(g.parts), g.complete, 'unterm');
     }
     this.gathering.clear();
-    return this.output();
   }
 
   /** find_phase over the first PHASE_WINDOW bytes, or over the whole stream when it is shorter. */
@@ -184,8 +235,18 @@ export class QdssDeframer {
     q.start += Math.min(this.phase, q.end - q.start);
   }
 
-  /** Every complete unit in the queue (iter_fragments). */
-  private units(): void {
+  /** Every complete unit in the queue (iter_fragments), resolving a pending resync first. `force` decides a
+   *  resync on the bytes at hand instead of waiting for its window: the stream, or a chunk sequence, has ended. */
+  private units(force = false): void {
+    for (;;) {
+      if (this.resync !== null && !this.resolveResync(force)) return;
+      if (!this.scanUnits()) return;
+    }
+  }
+
+  /** Consumes complete units. Returns true when it stopped on a slip (a resync is now pending), false when it
+   *  ran out of bytes. */
+  private scanUnits(): boolean {
     const q = this.queue;
     const s = q.bytes;
     let i = q.start;
@@ -215,9 +276,50 @@ export class QdssDeframer {
         else this.stats.add('u_cont_orphan');
       } else {
         this.stats.add('u_badtype');
+        if (++this.badRun >= RESYNC_RUN) {
+          // The phase has slipped: every unit since the run began was read at the wrong offset.
+          q.start = i - (RESYNC_RUN - 1) * UNIT;
+          this.slipped('slip');
+          return true;
+        }
+        continue; // a bad unit does not break the run
       }
+      this.badRun = 0;
     }
     q.start = i;
+    return false;
+  }
+
+  /** Layer 2 lost the phase (a slip) or the stream jumped (a hole): the fragments in flight cannot be finished, so
+   *  they are closed for what they hold, the lanes are unbound, and the phase is re-found from here. Closing them
+   *  rather than discarding them is worth about 125 records on the moving capture, all of them short and counted. */
+  private slipped(reason: 'slip' | 'gap'): void {
+    this.stats.add(`resync_${reason}`);
+    this.reset();
+    this.resync = this.queue.base + this.queue.start;
+  }
+
+  /** Layer 2's state: the fragments in flight and the lane bindings (a channel unit rebinds a lane after a slip). */
+  private reset(): void {
+    this.badRun = 0;
+    this.drain();
+    this.lanes.fill(UNBOUND);
+  }
+
+  /** Re-finds the phase from `resync` once RESYNC_WINDOW bytes are there, or on `force` with what there is.
+   *  Returns false while it waits, so the result never depends on how the bytes were fed. */
+  private resolveResync(force: boolean): boolean {
+    const q = this.queue;
+    const from = this.resync! - q.base;
+    const have = q.end - from;
+    if (have < RESYNC_WINDOW + UNIT && !force) return false;
+    this.resync = null;
+    const p = findPhase(q.bytes.subarray(from, from + Math.min(have, RESYNC_WINDOW + UNIT)));
+    // Phase 0 is the alignment that just failed, so no better one is in view: step over the bad run instead, so
+    // the scan always moves forward and a long damaged stretch cannot loop.
+    this.stats.add(p === 0 ? 'resync_kept_phase' : 'resync_new_phase');
+    q.start = Math.min(from + (p === 0 ? RESYNC_RUN * UNIT : p), q.end);
+    return true;
   }
 
   /** A fragment closed: assembly counters, then gathering by kind. */

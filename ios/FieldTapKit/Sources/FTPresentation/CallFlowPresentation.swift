@@ -187,19 +187,9 @@ public enum CallFlowPresentation {
             : "\(minutes):\(pad(seconds, 2)).\(pad(millis, 3))"
     }
 
-    /// A span: "0.4 ms", "67.5 ms", "335 ms", "1.24 s", "12.3 s", "2 min 3 s", "1 h 5 min".
-    public static func duration(_ ms: Double) -> String {
-        guard ms.isFinite else { return "—" }
-        if ms < 0 { return duration(0) }
-        if ms < 100 { return Fmt.fixed(ms, 1) + " ms" }
-        if ms < 1000 { return Fmt.fixed(ms, 0) + " ms" }
-        if ms < 10_000 { return Fmt.fixed(ms / 1000, 2) + " s" }
-        if ms < 60_000 { return Fmt.fixed(ms / 1000, 1) + " s" }
-        if ms < 3_600_000 {
-            return "\(Int64(ms / 60_000)) min \(Int64(ms.truncatingRemainder(dividingBy: 60_000) / 1000)) s"
-        }
-        return "\(Int64(ms / 3_600_000)) h \(Int64(ms.truncatingRemainder(dividingBy: 3_600_000) / 60_000)) min"
-    }
+    /// A span: "0.4 ms", "67.5 ms", "335 ms", "1.24 s", "12.3 s", "2 min 3 s", "1 h 5 min". The rule itself is
+    /// `Fmt.duration`, which every other screen uses too.
+    public static func duration(_ ms: Double) -> String { Fmt.duration(ms) }
 
     /// The gap to the message before, or nil for the first.
     public static func gap(_ events: [Event], _ index: Int) -> Double? {

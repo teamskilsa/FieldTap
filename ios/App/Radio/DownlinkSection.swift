@@ -18,7 +18,10 @@ struct DownlinkSection: View {
         let window = session.visibleWindow
         let carriers = Set(RadioData.series(phy, .lte_dl_mcs).map(\.carrier)).sorted()
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(title: "Downlink, LTE", source: "0xB173 v50 PDSCH stat, C-RNTI transport blocks", session: session,
+            // Plain words, not the record's name: "0xB173 v50 PDSCH stat" means nothing to the person holding
+            // the phone, and the code is still one tap away in Decoder health.
+            SectionHeader(title: "Downlink, LTE", source: "Every block of data the network sent to this iPhone",
+                          session: session,
                           warning: RadioData.warning(phy, checks: ["b173TbsTable"])) { t in
                 Self.readouts(phy, t)
             }

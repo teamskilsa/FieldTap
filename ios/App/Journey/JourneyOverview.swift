@@ -65,6 +65,9 @@ struct OverviewPage: View {
             .padding(.top, 14)
             .padding(.bottom, 24)
         }
+        // The floating cursor bar is laid out as a safe-area inset, but its glass is rounded and inset, so the
+        // last row needs a little more room than the inset gives it (CapturePageLayout).
+        .contentMargins(.bottom, CapturePageLayout.scrollBottomInset, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
         .journeyStripCollapses(with: session)
         .onAppear { scrollForLaunch(reader) }

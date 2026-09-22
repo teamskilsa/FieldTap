@@ -1,6 +1,7 @@
-// OWNER: signalling agent (seeded by the engine foundation). The call flow as CallFlow.kt builds it at contract
-// v1, field for field, so the golden dump (callflow-golden.json) is a direct serialisation. Absent values are
-// null, as in the golden; analyze.ts maps a Flow to the UI's types.
+// OWNER: signalling agent. The call flow as CallFlow.kt builds it at contract v1 (ios/Contract/src-v1), field for
+// field, so the golden dump (golden.ts, callflow-golden.json) is a direct serialisation. Absent values are null,
+// as in the golden. It holds decoded identifiers and PDU bytes: ui.ts maps it to the UI's types, masked unless
+// reveal is asked for.
 
 import type { Cell, ConnectionOutcome, Layer, Move, Outcome } from '../types.ts';
 

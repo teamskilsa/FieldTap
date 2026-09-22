@@ -181,6 +181,20 @@ import FTModel
         #expect(s == B887.Slot(frame: 571, slot: 5, pci: 80, tbsBytes: 3_585, mcs: 27, nRb: 52, harq: 9, layers: 2, crcOk: true))
     }
 
+    /// The widths the second capture needs: 106 resource blocks (8 bits), 4 layers (2 bits), slot 17 (5 bits)
+    /// and a transport block whose size stays inside the 18 bits TBS really has.
+    @Test func b887WideNrFieldsDecode() throws {
+        var p = Packing(8 + 44)
+        p.u16(0, 13); p.u16(2, 3); p.u8(7, 1)
+        p.u32(16, field(1_022, 5, 10) | field(17, 15, 5)); p.u16(20, 500)
+        p.u32(24, field(245_760, 5, 18) | field(20, 26, 5))
+        p.u32(28, field(106, 0, 8) | field(15, 11, 4) | field(3, 29, 2))
+        p.u8(32, 0)
+        let s = try #require(B887.decode(p.bytes).value?.first)
+        #expect(s == B887.Slot(frame: 1_022, slot: 17, pci: 500, tbsBytes: 245_760, mcs: 20, nRb: 106, harq: 15,
+                               layers: 4, crcOk: false))
+    }
+
     @Test func b888NrPdschStatsV31() throws {
         var p = Packing(92)
         p.u16(0, 1); p.u16(2, 3)

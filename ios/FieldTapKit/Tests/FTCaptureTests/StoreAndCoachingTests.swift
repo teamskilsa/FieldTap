@@ -53,17 +53,35 @@ import FTModel
 }
 
 @Suite struct CoachingTests {
+    /// R2, both captures: get ready for 3 s, do it until 12 s, then wait for the sysdiagnose.
     @Test func countdownPhases() {
         let press = Date(timeIntervalSinceReferenceDate: 0)
         let c = CaptureCountdown(pressedAt: press)
-        #expect(c.phase(at: press) == .getReady(secondsLeft: 20))
-        #expect(c.phase(at: press.addingTimeInterval(19.2)) == .getReady(secondsLeft: 1))
-        #expect(c.phase(at: press.addingTimeInterval(20)) == .doItNow(secondsLeft: 20))
-        #expect(c.phase(at: press.addingTimeInterval(25)).token == "doItNow")
-        #expect(c.phase(at: press.addingTimeInterval(40)) == .waiting(secondsLeft: 560))
+        #expect(c.phase(at: press) == .getReady(secondsLeft: 3))
+        #expect(c.phase(at: press.addingTimeInterval(2.2)) == .getReady(secondsLeft: 1))
+        #expect(c.phase(at: press.addingTimeInterval(3)) == .doItNow(secondsLeft: 9))
+        #expect(c.phase(at: press.addingTimeInterval(8)).token == "doItNow")
+        #expect(c.phase(at: press.addingTimeInterval(11.9)) == .doItNow(secondsLeft: 1))
+        #expect(c.phase(at: press.addingTimeInterval(12)) == .waiting(secondsLeft: 588))
         #expect(c.phase(at: press.addingTimeInterval(599.5)) == .waiting(secondsLeft: 1))
         #expect(c.phase(at: press.addingTimeInterval(600)) == .ready)
-        #expect(c.readyAt.timeIntervalSince(press) == 600 && c.doItNowAt.timeIntervalSince(press) == 20)
+        #expect(c.readyAt.timeIntervalSince(press) == 600 && c.doItNowAt.timeIntervalSince(press) == 3)
+        #expect(c.waitAt.timeIntervalSince(press) == 12 && CaptureCountdown.doItBySeconds == 12)
+    }
+
+    /// The timing advice lives in one constant, and it is the advice the evidence supports: press first, do the
+    /// thing 3-5 s later, be finished by about 12 s, press within 2-3 s for something that already happened,
+    /// and an idle phone reaches back minutes. Nothing here may say 20 to 40 seconds again.
+    @Test func timingAdviceMatchesTheCountdown() {
+        let t = CaptureWording.timing
+        #expect(t.hasPrefix("Press the buttons first"))
+        #expect(t.contains("3 to 5 seconds later"))
+        #expect(t.contains("\(Int(CaptureCountdown.doItBySeconds)) seconds"))
+        #expect(t.contains("2 to 3 seconds"))
+        #expect(t.contains("reaches back minutes"))
+        #expect(!t.contains("20 to 40") && !t.contains("27 seconds"))
+        // One paragraph, no line breaks: it is shown inside cards and under the countdown ring.
+        #expect(!t.contains("\n"))
     }
 
     @Test func wording() {

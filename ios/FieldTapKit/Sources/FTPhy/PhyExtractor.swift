@@ -311,8 +311,11 @@ struct Extraction {
         }
     }
 
-    /// The N'RE per PRB values the TBS check tries (12 subcarriers x 10-13 symbols, less DMRS/overhead).
-    static let nrRePerPrb = [120, 126, 132, 138, 144, 150]
+    /// The N'RE per PRB values the TBS check tries (12 subcarriers x 10-13 symbols, less DMRS/overhead), up to
+    /// the 156 that TS 38.214 5.1.3.2 caps N_RE at. The first capture never used the cap; the second one, on a
+    /// wide carrier, has 84 transport blocks that only 156 explains, and with it every one of its 828 new
+    /// transmissions matches.
+    static let nrRePerPrb = [120, 126, 132, 138, 144, 150, 156]
 
     mutating func nrSlot(_ s: B887.Slot, _ t: Double) {
         if s.mcs < 28 {

@@ -106,8 +106,8 @@ export function findings(flow: Flow, journey: Omit<Journey, 'findings' | 'tiles'
   for (const m of markers) {
     if (m.severity === 'info') continue;
     if (m.kind === 'failure' && m.endEvent !== undefined && m.endEvent !== m.event && failedAt.has(m.endEvent)) continue;
-    const failure = m.severity === 'failure';
-    timed.push({ id: `${failure ? 'failure' : 'warning'}-${m.id}`, kind: failure ? 'failure' : 'warning', severity: m.severity, text: problemText(flow, m, journey, on), tMs: m.tMs, ...(m.event === undefined ? {} : { event: m.event }) });
+    const kind = m.severity === 'failure' ? 'failure' : 'warning';
+    timed.push({ id: m.id.startsWith(`${kind}-`) ? m.id : `${kind}-${m.id}`, kind, severity: m.severity, text: problemText(flow, m, journey, on), tMs: m.tMs, ...(m.event === undefined ? {} : { event: m.event }) });
   }
 
   const ordered = timed.map((f, i) => ({ f, i })).sort((a, b) => (a.f.tMs ?? 0) - (b.f.tMs ?? 0) || a.i - b.i).map((e) => e.f);
@@ -156,7 +156,7 @@ function tail(flow: Flow, timed: Finding[], journey: Omit<Journey, 'findings' | 
   const unanswered = flow.procedures.filter((p) => p.outcome === 'UNANSWERED').length;
   if (failures > 0) {
     const w = warnings ? ` and ${warnings} warning${warnings === 1 ? '' : 's'}` : '';
-    out.push({ id: 'failures', kind: 'failures', severity: 'failure', text: `${failures} failure${failures === 1 ? '' : 's'}${w} in this capture: see above.` });
+    out.push({ id: 'failures', kind: 'failures', severity: 'failure', text: `${failures} failure${failures === 1 ? '' : 's'}${w} in this capture.` });
   } else {
     const text = total === 0
       ? 'No failures logged.'

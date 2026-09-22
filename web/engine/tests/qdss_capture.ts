@@ -6,12 +6,14 @@
 // Prints counts, codes, record versions and md5s only: never a record body or anything read from one beyond
 // its version field.
 
+import { chunkNumber } from '../src/archive/info.ts';
 import { readSysdiagnose } from '../src/archive/sysdiagnose.ts';
 import { writeQmdl } from '../src/diag/qmdl.ts';
 import { hexCode, type LogRecord } from '../src/diag/record.ts';
 import { type DeframeOutput, type DeframerOptions, QdssDeframer } from '../src/qdss/deframer.ts';
-import { archive, REAL } from '../tools/fixtures.ts';
+import { type CaptureSource, captureSource, REAL } from '../tools/fixtures.ts';
 import { Md5 } from '../tools/md5.ts';
+import { openCapture } from './support.ts';
 
 export interface CaptureRun {
   output: DeframeOutput;
@@ -21,25 +23,34 @@ export interface CaptureRun {
   /** Largest RSS and heap seen at the sample points (after reading, after each 16 chunks, after finish). */
   sampledRssMb: number;
   sampledHeapMb: number;
+  /** Which form of the capture was read. */
+  from: CaptureSource['kind'];
 }
 
 const mb = (n: number) => Math.round(n / 1e5) / 10;
 
-export async function deframeArchive(path: string, options: DeframerOptions = {}): Promise<CaptureRun> {
+/** `name` is a `REAL` entry: read from its .tar.gz, or from its extracted folder when that is all there is. */
+export async function deframeArchive(name: string, options: DeframerOptions = {}): Promise<CaptureRun> {
   let rss = 0, heap = 0;
   const sample = () => {
     const m = Deno.memoryUsage();
     rss = Math.max(rss, m.rss);
     heap = Math.max(heap, m.heapUsed);
   };
+  const source = captureSource(name) as CaptureSource;
   const t0 = performance.now();
-  const file = await Deno.open(path);
-  const { parts } = await readSysdiagnose(file.readable, { totalBytes: (await Deno.stat(path)).size });
+  const { stream, totalBytes } = openCapture(source);
+  const { parts } = await readSysdiagnose(stream, { totalBytes });
   const t1 = performance.now();
   sample();
-  // As analyze.ts feeds it: whole chunks in name order, each let go once fed.
+  // As analyze.ts feeds it: whole chunks in name order, each let go once fed, and gap() wherever the trace is
+  // missing files, so the deframer re-finds its unit phase across the hole.
   const deframer = new QdssDeframer(options);
+  let previous: number | null = null;
   parts.chunks.forEach((chunk, i) => {
+    const sequence = chunkNumber(chunk.name);
+    if (previous !== null && sequence !== null && sequence !== previous + 1) deframer.gap();
+    previous = sequence;
     deframer.feed(chunk.bytes);
     deframer.endChunk();
     chunk.bytes = new Uint8Array(0);
@@ -48,7 +59,7 @@ export async function deframeArchive(path: string, options: DeframerOptions = {}
   const output = deframer.finish();
   const t2 = performance.now();
   sample();
-  return { output, chunks: parts.chunks.length, readMs: t1 - t0, deframeMs: t2 - t1, sampledRssMb: mb(rss), sampledHeapMb: mb(heap) };
+  return { output, chunks: parts.chunks.length, readMs: t1 - t0, deframeMs: t2 - t1, sampledRssMb: mb(rss), sampledHeapMb: mb(heap), from: source.kind };
 }
 
 export function qmdlMd5(records: LogRecord[]): string {
@@ -79,10 +90,10 @@ export function versions(records: LogRecord[], code: number): Record<string, num
 
 if (import.meta.main) {
   const which = Deno.args[0] ?? 'first';
-  const path = which === 'first' ? archive(REAL.first) : which === 'moving' ? archive(REAL.moving) : which;
-  const run = await deframeArchive(path);
+  const run = await deframeArchive(which === 'moving' ? REAL.moving : which === 'first' ? REAL.first : which);
   const { stats, secure } = run.output;
   const report: Record<string, unknown> = {
+    from: run.from,
     chunks: run.chunks,
     readMs: Math.round(run.readMs),
     deframeMs: Math.round(run.deframeMs),
