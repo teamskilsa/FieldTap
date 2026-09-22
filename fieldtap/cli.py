@@ -231,16 +231,31 @@ def cmd_decode(args) -> int:
     if session is not None:
         session.finish({"transport": "file", "path": args.input}, {}, {}, None, {}, result.client_stats,
                        result.framing, result.decoder, result.sinks, {"pcapng": pcapng_path})
-    _log("%d records -> %d messages, %d cell-info records" % (result.records, result.messages, result.cell_info))
+    _log("%d records -> %d messages, %d cell-info records, %d other records kept"
+         % (result.records, result.messages, result.cell_info, result.diag_records))
     if result.framing.get("crc_errors"):
         _log("framing: %d crc errors" % result.framing["crc_errors"])
-    for name, count in sorted(result.decoder["unknown_codes"].items()):
-        _log("unknown log code %s x%d" % (name, count))
+    _log_coverage(result.decoder.get("coverage", {}))
     if result.decoder["errors"]:
         _log("decoder notes: %s" % result.decoder["errors"])
     for path in outputs:
         print(path)
-    return 0 if result.messages else 1
+    return 0 if (result.messages or result.diag_records) else 1
+
+
+def _log_coverage(coverage: dict) -> None:
+    """What every log code in the capture became in the pcap. Nothing is dropped:
+    a code with no layout is still written, as bytes, under the fieldtap-diag wrapper."""
+    if not coverage:
+        return
+    _log("coverage (every record is in the pcap; 'raw' = no layout, bytes only):")
+    for code, row in coverage.items():
+        ways = ", ".join("%s %d" % (k, v) for k, v in sorted(row["as"].items()))
+        _log("  %s  %-48s %6d  %s" % (code, row["name"][:48], row["records"], ways))
+    raw_codes = [c for c, r in coverage.items() if set(r["as"]) == {"raw"}]
+    if raw_codes:
+        _log("  %d code(s) have no layout yet; the Wireshark plugin (wireshark/fieldtap.lua) shows their bytes"
+             % len(raw_codes))
 
 
 def _mmss(seconds: float) -> str:

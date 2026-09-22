@@ -7,4 +7,4 @@ part, and the part these modules are built around, is that the wrapper layout
 changes with the record's packet version across modem generations.
 """
 
-from .records import CellInfo, DecodedMessage, Decoder  # noqa: F401
+from .records import CellInfo, DecodedMessage, Decoder, DiagRecord  # noqa: F401

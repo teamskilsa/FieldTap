@@ -45,6 +45,10 @@ def _parse_comment(comment: str):
     return m.group("rat"), m.group("layer"), m.group("channel"), (m.group("name") or "").strip()
 
 
+# Records that are not RRC/NAS messages travel in the same pcap under these dissectors.
+NON_MESSAGE_DISSECTORS = ("fieldtap-diag", "mac-lte-framed")
+
+
 def load_events(path: str, use_tshark: bool = True) -> list:
     events = []
     first: Optional[int] = None
@@ -59,6 +63,8 @@ def load_events(path: str, use_tshark: bool = True) -> list:
     for number, pkt in enumerate(read_packets(path), start=1):
         parsed = _parse_comment(pkt.comment or "")
         options, _payload = exported_pdu.parse(pkt.data) if pkt.linktype == exported_pdu.LINKTYPE_WIRESHARK_UPPER_PDU else ({}, b"")
+        if options.get("dissector") in NON_MESSAGE_DISSECTORS:
+            continue    # cell info, measurements, MAC blocks: in the pcap, not in the call flow
         if parsed is None:
             rat, layer, channel, name = "?", "?", options.get("dissector", "?"), ""
         else:

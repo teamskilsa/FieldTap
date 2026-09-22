@@ -4,7 +4,7 @@ direction cross-check, cell info, robustness."""
 import struct
 
 from fieldtap import fixtures
-from fieldtap.decode import Decoder, DecodedMessage
+from fieldtap.decode import CellInfo, Decoder, DecodedMessage, DiagRecord
 from fieldtap.decode import lte_rrc, nr_rrc
 from fieldtap.decode.msgnames import rrc_message_name
 from fieldtap.diag.protocol import LogRecord
@@ -15,9 +15,17 @@ def _decode_all():
     decoder = Decoder()
     messages = []
     cells = []
+    diag = []
     for code, ts, body in records:
         for obj in decoder.decode(LogRecord(code, ts, body)):
-            (messages if isinstance(obj, DecodedMessage) else cells).append(obj)
+            if isinstance(obj, DecodedMessage):
+                messages.append(obj)
+            elif isinstance(obj, CellInfo):
+                cells.append(obj)
+            else:
+                assert isinstance(obj, DiagRecord)
+                diag.append(obj)
+    _decode_all.diag = diag
     return decoder, messages, cells, expected
 
 
@@ -43,11 +51,25 @@ def test_decoder_statistics():
     rep = decoder.report()
     assert rep["stats"]["messages"] == len(expected)
     assert rep["stats"]["cell_info"] == 2
-    assert rep["stats"]["not_decoded"] == 1          # 0xB193 listed, no decoder
     assert rep["unknown_codes"] == {"0xB0FF": 1}
     assert rep["stats"]["direction_conflicts"] == 1
     assert rep["layout_sources"]["probed"] >= 3
     assert rep["stats"]["errors"] == 0
+    # Nothing is dropped: every record that is not a message is a DiagRecord on its way to the pcap.
+    diag = _decode_all.diag
+    assert rep["stats"]["diag_records"] == len(diag) == len(records_total()) - len(expected)
+    assert rep["coverage"]["0xB0FF"] == {"name": "unknown log 0xB0FF", "records": 1, "as": {"raw": 1}, "confidence": "low"}
+    assert rep["coverage"]["0xB0C2"]["as"] == {"cell": 1}
+    assert rep["coverage"]["0xB0C0"]["as"] == {"message": 6}
+    raw = [d for d in diag if d.log_code == 0xB0FF][0]
+    assert raw.decoded == "raw" and raw.body == b"\x00\x01\x02" and "no layout" in raw.comment()
+    cell = [d for d in diag if d.log_code == 0xB0C2][0]
+    assert cell.decoded == "fields" and cell.fields["plmn"] == "310260" and "plmn 310260" in cell.comment()
+
+
+def records_total():
+    records, _ = fixtures.build_corpus()
+    return records
 
 
 def test_cell_info_fields():

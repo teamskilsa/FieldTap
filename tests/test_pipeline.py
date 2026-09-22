@@ -36,8 +36,10 @@ def test_replay_qmdl_to_pcapng_and_gsmtap(tmp_path):
     assert result.framing["crc_errors"] == 1
     assert result.client_stats["stray_responses"] == 1     # the 0x7C frame in the noise
     packets = list(read_packets(pcapng))
-    assert len(packets) == len(expected)
-    for pkt, exp in zip(packets, expected):
+    # Every record is in the pcap: the messages as native PDUs, the rest under fieldtap-diag.
+    assert result.diag_records == len(records) - len(expected)
+    assert len(packets) == len(expected) + result.diag_records
+    for pkt, exp in zip(packets[:len(expected)], expected):
         options, payload = exported_pdu.parse(pkt.data)
         assert options["dissector"] == exp.dissector
         assert payload == exp.payload
@@ -49,6 +51,13 @@ def test_replay_qmdl_to_pcapng_and_gsmtap(tmp_path):
     lte_count = sum(1 for e in expected if e.rat == "lte")
     assert result.sinks["GsmtapPcapSink"]["packets"] == lte_count
     assert result.sinks["GsmtapPcapSink"]["skipped_no_gsmtap"] == len(expected) - lte_count
+    assert result.sinks["GsmtapPcapSink"]["skipped_diag_record"] == result.diag_records
+    from fieldtap.output import fieldtap_diag
+    extra = packets[len(expected):]
+    for pkt in extra:
+        options, payload = exported_pdu.parse(pkt.data)
+        assert options["dissector"] == fieldtap_diag.DISSECTOR
+        assert fieldtap_diag.parse(payload)["log_code"] in (0xB0C2, 0xB0C1, 0xB193, 0xB0FF)
 
 
 def test_replay_dlf_matches_qmdl(tmp_path):
@@ -103,7 +112,8 @@ def test_info_and_flow(tmp_path):
     mermaid = flow.render_mermaid(events)
     assert mermaid.startswith("sequenceDiagram") and "UE->>NW: LTE RRC rrcConnectionRequest" in mermaid
     pc = info.inspect(out)
-    assert pc["packets"] == len(expected) and pc["dissectors"]["nr-rrc.ul.ccch"] == 1
+    assert pc["packets"] == len(expected) + 4 and pc["dissectors"]["nr-rrc.ul.ccch"] == 1
+    assert pc["dissectors"]["fieldtap-diag"] == 4
 
 
 def test_client_handshake_over_loopback():

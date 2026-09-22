@@ -49,14 +49,17 @@ def version(tshark: Optional[str] = None) -> Optional[str]:
 
 
 def fields(path: str, names: list, display_filter: Optional[str] = None,
-           tshark: Optional[str] = None, occurrence: str = "a") -> list:
+           tshark: Optional[str] = None, occurrence: str = "a", lua_scripts: Optional[list] = None) -> list:
     """Run tshark -T fields and return rows of strings (one per packet).
-    Multiple occurrences of a field in one packet are joined with ','."""
+    Multiple occurrences of a field in one packet are joined with ','.
+    lua_scripts: plugin files to load with -X lua_script (the FieldTap dissector)."""
     tshark = tshark or find_tshark()
     if not tshark:
         raise RuntimeError("tshark not found (install Wireshark, or set FIELDTAP_TSHARK)")
     cmd = [tshark, "-r", path, "-T", "fields", "-E", "separator=\t", "-E", "occurrence=%s" % occurrence,
            "-E", "aggregator=,"]
+    for script in lua_scripts or []:
+        cmd += ["-X", "lua_script:%s" % script]
     for name in names:
         cmd += ["-e", name]
     if display_filter:
@@ -79,8 +82,9 @@ def protocol_summary(path: str, tshark: Optional[str] = None) -> Counter:
     return counter
 
 
-def malformed(path: str, tshark: Optional[str] = None) -> list:
+def malformed(path: str, tshark: Optional[str] = None, lua_scripts: Optional[list] = None) -> list:
     """Frames Wireshark flags as malformed or with error-level expert info."""
     rows = fields(path, ["frame.number", "_ws.expert.message"],
-                  display_filter="_ws.malformed || _ws.expert.severity == error", tshark=tshark)
+                  display_filter="_ws.malformed || _ws.expert.severity == error", tshark=tshark,
+                  lua_scripts=lua_scripts)
     return [(int(r[0]), r[1]) for r in rows if r[0]]

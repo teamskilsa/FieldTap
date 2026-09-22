@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .decode import Decoder
+from .decode.records import DiagRecord
 from .decode.records import DecodedMessage
 from .decode.registry import ALL_PROFILE, profile_codes
 from .diag.client import DiagClient, DiagError
@@ -38,6 +39,7 @@ class RunResult:
     records: int = 0
     messages: int = 0
     cell_info: int = 0
+    diag_records: int = 0
     seconds: float = 0.0
     log_mask: dict = field(default_factory=dict)
     modem: dict = field(default_factory=dict)
@@ -150,6 +152,9 @@ def run(transport: Transport, sinks: list, decoder: Optional[Decoder] = None,
                     if isinstance(obj, DecodedMessage):
                         multi.write(obj)
                         result.messages += 1
+                    elif isinstance(obj, DiagRecord):
+                        multi.write(obj)
+                        result.diag_records += 1
                     else:
                         result.cell_info += 1
                 now = time.monotonic()
@@ -206,6 +211,9 @@ def replay_dlf(path: str, sinks: list, decoder: Optional[Decoder] = None,
                 if isinstance(obj, DecodedMessage):
                     multi.write(obj)
                     result.messages += 1
+                elif isinstance(obj, DiagRecord):
+                    multi.write(obj)
+                    result.diag_records += 1
                 else:
                     result.cell_info += 1
     finally:
