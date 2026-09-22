@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# Dev-only fixtures built from a real capture, plus the screenshots taken of them. Capture-derived data never
+# goes into git.
+public/dev/
+.screenshots/
+*.tsbuildinfo
