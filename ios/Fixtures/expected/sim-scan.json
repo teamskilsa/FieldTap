@@ -1,0 +1,16 @@
+{
+ "_what": "Expected scan.json of the user's sysdiagnose streamed with -FTScanOnly (sim-verify.sh --stage scan): the foundation POC's numbers. Counts only; committed.",
+ "ok": true,
+ "error": {"$present": false},
+ "compressedBytes": 408450455,
+ "basebandFiles": 135,
+ "basebandBytes": 134161706,
+ "adler32Hex": "a0e39d83",
+ "appleDoubleSkipped": {"$min": 130},
+ "qdssChunks": 130,
+ "qdssDirs": 1,
+ "profileStubs": {"$min": 1},
+ "ambtoolLog": true,
+ "basebandLoggingEnabled": true,
+ "seconds": {"$max": 60}
+}

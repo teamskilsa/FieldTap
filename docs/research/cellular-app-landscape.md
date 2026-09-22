@@ -118,7 +118,11 @@ target users rather than assumed from reviews.
 
 ## iOS
 
-Not viable for this category outside an enterprise build.
+No live measurements, but a modem trace after the fact. The earlier verdict here, that iOS is not viable for
+this category outside an enterprise build, is superseded: with Apple's own Baseband logging profile a stock
+iPhone's sysdiagnose carries the modem's Qualcomm DIAG trace, and FieldTap rebuilds it into a `.qmdl` and
+decodes its RRC and NAS. See [`iphone-baseband-capture.md`](iphone-baseband-capture.md). What still holds for
+a live app:
 
 - Field Test Mode (`*3001#12345#*`) still works, but it is a manual screen with no
   interface, no logging and no export.
@@ -149,4 +153,4 @@ Not viable for this category outside an enterprise build.
 - Opensignal and Tutela — https://www.rcrwireless.com/20190909/big-data-analytics/tutela-acquired-by-comlinkdata ; https://www.telecompaper.com/news/opensignal-acquired-by-tutela-owner-comlinkdata--1397184
 - Developer verification — https://developer.android.com/developer-verification/guides/faq ; https://android-developers.googleblog.com/2026/03/android-developer-verification-rolling-out-to-all-developers.html
 - F-Droid — https://f-droid.org/en/docs/Inclusion_Policy/ ; https://gitlab.com/fdroid/admin/-/issues/599
-- iOS — https://developer.apple.com/forums/thread/751785 ; https://github.com/palera1n/palera1n ; https://www.cellmapper.net/apps
+- iOS — https://developer.apple.com/forums/thread/751785 ; https://github.com/palera1n/palera1n ; https://www.cellmapper.net/apps ; the sysdiagnose route and its sources: [`iphone-baseband-capture.md`](iphone-baseband-capture.md)

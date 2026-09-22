@@ -1,0 +1,265 @@
+{
+ "_what": "Expected analysis.json of the user's iPhone 17 sysdiagnose imported through FT_FEED_PATH (sim-verify.sh --stage full). Counts, kinds and ids only; committed. Operators: see scripts/check_sim_analysis.py.",
+ "_sources": "callflow-golden.json (flow), qdss-full-stats.json (deframe), phy-golden.json samples with the contract's (UTC second, carrier) bins for lte_dl_bler/lte_dl_phy_throughput (35) and lte_ul_phy_throughput (27), phy-summary.json, journey-expected.json with the CONTRACT.md v1 amendments, the archive's info.txt and profile stub (R2 window, overwritten files, 7-day lifetime).",
+ "schema": 1,
+ "source": "import",
+ "ok": true,
+ "error": {
+  "$present": false
+ },
+ "capture": {
+  "records": 92133,
+  "distinctCodes": 224,
+  "crcErrors": 0,
+  "qmdlMd5": "e53a167b29b25560938d1f089e719d33",
+  "qmdlBytes": 39974284,
+  "storedRecords": 92133,
+  "chunkCount": 130,
+  "traceDirFound": true,
+  "hasTrace": true,
+  "problems": [],
+  "basebandLoggingEnabled": true,
+  "profile": {
+   "baseband": true,
+   "statusAtTrigger": "active",
+   "lifetimeDays": {
+    "$approx": 7.0,
+    "tol": 0.001
+   },
+   "consentDays": 7
+  },
+  "traceWindowAfterPressMs": {
+   "startMs": {
+    "$approx": 19000,
+    "tol": 1000
+   },
+   "endMs": {
+    "$approx": 46844,
+    "tol": 1000
+   }
+  },
+  "overwrittenFiles": 111,
+  "listedFiles": 241,
+  "deframe": {
+   "atid32Bytes": 124618275,
+   "chunks": 130,
+   "phase": 8,
+   "logRecords": 92133,
+   "distinctCodes": 224,
+   "packets": {
+    "$exact": {
+     "secure": 23764,
+     "log": 91500,
+     "qsr4_0x99": 45528,
+     "extmsg_0x79": 10194,
+     "log_unterm": 633,
+     "cmd_0x9d": 487,
+     "event_0x60": 1234
+    }
+   },
+   "ts": {
+    "$exact": {
+     "2026": 86961,
+     "zero": 5139,
+     "other": 33
+    }
+   }
+  },
+  "secure": {
+   "records": 23764,
+   "codes": 61
+  },
+  "durationMs": 26959.395
+ },
+ "flow": {
+  "records": 92133,
+  "undecoded": 5,
+  "crcErrors": 0,
+  "durationMs": 26959.395,
+  "startUtcKnown": true,
+  "events": 128,
+  "eventsByLayerRatDirection": {
+   "$exact": {
+    "NAS/lte/DL": 11,
+    "NAS/lte/UL": 13,
+    "RRC/lte/DL": 50,
+    "RRC/lte/UL": 50,
+    "RRC/nr/DL": 2,
+    "RRC/nr/UL": 2
+   }
+  },
+  "failures": 0,
+  "procedures": 34,
+  "procedureOutcomes": {
+   "$exact": {
+    "SUCCEEDED": 34
+   }
+  },
+  "steps": [
+   "FIRST_SEEN",
+   "RESELECTION",
+   "HANDOVER",
+   "HANDOVER"
+  ],
+  "connections": [
+   "RELEASED",
+   "OPEN_AT_END"
+  ],
+  "cellDetails": 3,
+  "searched": 0
+ },
+ "phy": {
+  "samples": {
+   "$exact": {
+    "lte_band": 3,
+    "lte_cqi_wideband_cw0": 2321,
+    "lte_cqi_wideband_cw1": 1522,
+    "lte_csf_tx_mode": 1770,
+    "lte_dl_bandwidth_prb": 5,
+    "lte_dl_bler": 35,
+    "lte_dl_crc_ok": 3303,
+    "lte_dl_layers": 2390,
+    "lte_dl_mcs": 3303,
+    "lte_dl_modulation": 3303,
+    "lte_dl_phy_throughput": 35,
+    "lte_dl_prb": 3303,
+    "lte_dl_tbs": 3303,
+    "lte_mac_ul_grant": 4537,
+    "lte_neighbour_rsrp": 475,
+    "lte_neighbour_rsrp_filtered": 475,
+    "lte_neighbour_rsrq_filtered": 475,
+    "lte_neighbour_rssi": 475,
+    "lte_pmi_wideband": 2321,
+    "lte_power_headroom": 442,
+    "lte_pusch_tx_power_required": 5365,
+    "lte_ri": 2322,
+    "lte_rsrp": 1945,
+    "lte_rsrp_filtered": 1945,
+    "lte_rsrp_per_rx": 2420,
+    "lte_rsrq_filtered": 1945,
+    "lte_rsrq_per_rx": 2420,
+    "lte_rssi": 1945,
+    "lte_rssi_per_rx": 2420,
+    "lte_rx_antennas_measured": 2420,
+    "lte_timing_advance_rar": 3,
+    "lte_tx_antennas_mib": 5,
+    "lte_ul_code_rate": 5365,
+    "lte_ul_mcs_derived": 5270,
+    "lte_ul_modulation": 5365,
+    "lte_ul_phy_throughput": 27,
+    "lte_ul_prb": 5365,
+    "lte_ul_tbs": 5365,
+    "nr_dl_bler": 22,
+    "nr_dl_crc_ok": 497,
+    "nr_dl_layers": 497,
+    "nr_dl_mac_throughput": 22,
+    "nr_dl_mcs": 497,
+    "nr_dl_modulation": 497,
+    "nr_dl_prb": 497,
+    "nr_dl_tbs": 497,
+    "nr_ss_rsrp": 40,
+    "nr_ss_rsrq": 40
+   }
+  },
+  "versionMisses": {
+   "$exact": {}
+  },
+  "checks": 5,
+  "checksPassed": 5,
+  "checksFailed": [],
+  "scellActivity": 3,
+  "nrDlRecords": 497,
+  "nrDlEarfcnKnown": false,
+  "rach": 3,
+  "rachTa": [
+   18,
+   13,
+   19
+  ],
+  "txAntennasMib": [
+   4
+  ],
+  "rxAntennaEarfcns": 3,
+  "encrypted": {
+   "records": 23764,
+   "codes": 61
+  }
+ },
+ "journey": {
+  "durationMs": 26959.395,
+  "lanes": {
+   "$exact": {
+    "state": 5,
+    "registration": 3,
+    "pcell": 4,
+    "pscell": 1,
+    "scell": 3
+   }
+  },
+  "states": [
+   "unknown",
+   "connected",
+   "radioOff",
+   "idle",
+   "connected"
+  ],
+  "registration": [
+   "registered",
+   "deregistered",
+   "registered"
+  ],
+  "pcellBands": [
+   "B2",
+   "B66",
+   "B12",
+   "B2"
+  ],
+  "pscellBandCandidates": [
+   [
+    5,
+    26
+   ]
+  ],
+  "markers": 13,
+  "markersByKind": {
+   "$exact": {
+    "attach": 1,
+    "detachSwitchOff": 1,
+    "handover": 2,
+    "rach": 3,
+    "reattach": 1,
+    "rrcRelease": 1,
+    "rrcSetup": 1,
+    "scgAdd": 1,
+    "scgModify": 1,
+    "scgRelease": 1
+   }
+  },
+  "failureMarkers": 0,
+  "markerIdsUnique": true,
+  "findings": 10,
+  "findingIdsUnique": true,
+  "findingKinds": {
+   "$contains": [
+    "reattach",
+    "handover",
+    "handover",
+    "carrierAggregation",
+    "noFailures",
+    "encryptedRecords",
+    "traceWindow"
+   ]
+  },
+  "findingKindsTail": [
+   "noFailures",
+   "encryptedRecords",
+   "traceWindow"
+  ]
+ },
+ "run": {
+  "config": "Harness",
+  "importSeconds": {
+   "$max": 240
+  }
+ }
+}

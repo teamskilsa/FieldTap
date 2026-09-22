@@ -243,6 +243,71 @@ def cmd_decode(args) -> int:
     return 0 if result.messages else 1
 
 
+def _mmss(seconds: float) -> str:
+    minutes, rest = divmod(round(abs(seconds)), 60)
+    return "%s%d:%02d" % ("-" if seconds < 0 else "", minutes, rest)
+
+
+def cmd_qdss(args) -> int:
+    """An iPhone sysdiagnose (or one of its log-bb-*-qdss folders) -> the .qmdl every other command reads."""
+    import tempfile
+    from .diag import qdss
+
+    source = args.input
+    workdir = None
+    pressed = None
+    try:
+        if os.path.isdir(source):
+            paths = qdss.chunk_paths(source)
+        elif os.path.isfile(source):
+            workdir = args.workdir or tempfile.mkdtemp(prefix="fieldtap-qdss-")
+            paths, info = qdss.chunks_from_sysdiagnose(source, workdir)
+            if info["appledouble_skipped"]:
+                _log("skipped %d AppleDouble ('._') entries" % info["appledouble_skipped"])
+            pressed = qdss.pressed_at(source)
+            installed, removal = qdss.profile_dates(info["profile_stub"]) if info["profile_stub"] else (None, None)
+            if removal is not None:
+                lapsed = pressed is not None and removal < pressed
+                _log("Baseband logging profile: installed %s, %s %s" % (
+                    installed.strftime("%Y-%m-%d %H:%M UTC") if installed else "?",
+                    "had expired on" if lapsed else "until", removal.strftime("%Y-%m-%d %H:%M UTC")))
+            if info["trace_dir"] is None:
+                if not info["profile_stub"]:
+                    _log("no modem trace in this archive: modem logging is off (no Baseband logging profile). "
+                         "Install Apple's profile, then take a new sysdiagnose")
+                elif removal is not None and pressed is not None and removal < pressed:
+                    _log("no modem trace in this archive: the logging profile had expired. Install it again, "
+                         "then take a new sysdiagnose")
+                else:
+                    _log("no modem trace in this archive although the profile is installed: restart the iPhone "
+                         "and take a new sysdiagnose")
+                return 1
+            _log("trace %s" % info["trace_dir"])
+        else:
+            _log("no such file or folder: %s" % source)
+            return 2
+        if not paths:
+            _log("no trace chunks (0x*.bin) in %s" % source)
+            return 1
+        _log("%d chunks, deframing" % len(paths))
+        result = qdss.deframe_chunks(paths)
+    finally:
+        if workdir is not None and not args.keep_chunks:
+            qdss.remove_workdir(workdir)
+    qdss.write_qmdl(result.records, args.output)
+    if args.stats:
+        with open(args.stats, "w") as fh:
+            json.dump(result.stats, fh, indent=1)
+    _log("%d log records (%d codes), %d encrypted by the modem and left out"
+         % (len(result.records), result.stats["distinct_codes"], len(result.secure)))
+    window = qdss.trace_window(result.records, pressed) if os.path.isfile(source) and pressed else None
+    if window:
+        _log("the trace covers %s to %s after the buttons were pressed (timing from early tests: press first, "
+             "then reproduce the problem 20 to 40 s later)" % (_mmss(window[0]), _mmss(window[1])))
+    print(args.output)
+    return 0 if result.records else 1
+
+
 def cmd_info(args) -> int:
     from . import info
     try:
@@ -606,6 +671,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", choices=("wireshark", "gsmtap", "both"), default="wireshark")
     p.add_argument("--session-dir", help="also write a session sidecar into this directory")
     p.set_defaults(func=cmd_decode)
+
+    p = sub.add_parser("qdss", help="rebuild a .qmdl from an iPhone sysdiagnose's baseband (QDSS) trace")
+    p.add_argument("input", help="sysdiagnose_*.tar.gz, or a logs/Baseband/log-bb-*-qdss folder")
+    p.add_argument("-o", "--output", required=True, help="the .qmdl to write")
+    p.add_argument("--stats", help="also write the deframer's counters as JSON")
+    p.add_argument("--workdir", help="where the trace chunks are unpacked (default: a temporary folder)")
+    p.add_argument("--keep-chunks", action="store_true",
+                   help="keep the unpacked chunks; they hold subscriber identifiers")
+    p.set_defaults(func=cmd_qdss)
 
     p = sub.add_parser("info", help="summarise a .qmdl, .dlf or .pcapng")
     p.add_argument("file")

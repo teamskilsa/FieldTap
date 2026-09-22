@@ -329,6 +329,75 @@ class CallFlowTest {
         assertNull(connection.establishmentCause)
     }
 
+    // MARK: - Contract v1: what an iPhone trace needs (ios/Contract/CONTRACT.md, D1 and D3)
+
+    /** A record stamped [gpsMs] after the GPS epoch, in the modem's 1.25 ms ticks. */
+    private fun stamped(gpsMs: Long, record: LogRecord) = record.copy(timestampRaw = (gpsMs * 4 / 5) shl 16)
+
+    /** A version-26 (iPhone 17) NR RRC OTA record body: 4-byte version, the 31-byte header of layout E, the PDU. */
+    private fun nrRrc(cell: CallFlow.Cell, pdu: Int, payload: ByteArray): ByteArray {
+        val body = ByteArray(4 + 31)
+        body[0] = 26
+        fun put(at: Int, v: Long, width: Int) {
+            for (i in 0 until width) body[4 + at + i] = (v ushr (8 * i)).toByte()
+        }
+        put(2, 1, 1)
+        put(3, cell.pci.toLong(), 2)
+        put(13, cell.earfcn, 4)
+        put(20, pdu.toLong(), 1)
+        put(25, payload.size.toLong(), 2)
+        return body + payload
+    }
+
+    private val scg = CallFlow.Cell(174_770, 80, nr = true)
+
+    /** An LTE reconfiguration that is not a handover: it carries radio resources only. */
+    private fun reconfiguration(cell: CallFlow.Cell) = record(0xB0C0, rrc(cell, dlDcch, bits("0 0100 00 0 000 0 0 0 1 0 0")))
+    private fun nrReconfiguration(cell: CallFlow.Cell) = record(0xB821, nrRrc(cell, 11, hex("0800")), afterMs = 1)
+    private fun nrReconfigurationComplete(cell: CallFlow.Cell) = record(0xB821, nrRrc(cell, 12, hex("0000")), afterMs = 1)
+
+    private fun CallFlow.Flow.reconfigurations() =
+        procedures.filter { it.name == "RRC reconfiguration" }.map { events[it.first].rat to it.outcome }
+
+    @Test
+    fun recordsBeforeNetworkTimeDoNotSetTheBaseline() {
+        // An iPhone trace opens with records the modem stamped before it had network time, counted from 1980.
+        // Measured from those, every event sat 46 years after the start and the trace had no wall-clock time.
+        val early = LogRecord(0xB193, (1_000L * 4 / 5) shl 16, ByteArray(4))
+        val t0 = 1_474_054_925_000L // 2026-09-21 19:42:05 UTC, in GPS milliseconds
+        val flow = CallFlow.of(listOf(early) + connected(a).mapIndexed { i, r -> stamped(t0 + 20L * i, r) })
+        assertEquals(4, flow.records)
+        assertEquals(1_790_019_725_000L, flow.startUtcMs)
+        assertEquals(40.0, flow.durationMs, 0.001)
+        assertEquals(listOf(0.0, 20.0, 40.0), flow.events.map { it.sinceStartMs })
+    }
+
+    @Test
+    fun anNrReconfigurationInsideAnLteOneIsAnsweredOnItsOwnRat() {
+        // EN-DC: the NR RRCReconfiguration rides inside the LTE one and the modem logs both. Each is answered by
+        // the complete on its own RAT; the NR start must not close the LTE one as unanswered.
+        val flow = CallFlow.of(
+            connected(a) + listOf(reconfiguration(a), nrReconfiguration(scg), nrReconfigurationComplete(scg), reconfigurationComplete(a)),
+        )
+        assertEquals(listOf("lte" to Outcome.SUCCEEDED, "nr" to Outcome.SUCCEEDED), flow.reconfigurations())
+        val lte = flow.procedures.first { it.name == "RRC reconfiguration" }
+        assertEquals(3, lte.first)
+        assertEquals(6, lte.last)
+    }
+
+    @Test
+    fun aSecondStartOnTheSameRatStillMeansTheFirstWentUnanswered() {
+        val flow = CallFlow.of(
+            connected(a) + listOf(
+                reconfiguration(a), nrReconfiguration(scg), reconfiguration(a), nrReconfigurationComplete(scg), reconfigurationComplete(a),
+            ),
+        )
+        assertEquals(
+            listOf("lte" to Outcome.UNANSWERED, "nr" to Outcome.SUCCEEDED, "lte" to Outcome.SUCCEEDED),
+            flow.reconfigurations(),
+        )
+    }
+
     // MARK: - NAS
 
     private fun nas(code: Int, pdu: String) = record(code, hex("01000000$pdu"), afterMs = 1)

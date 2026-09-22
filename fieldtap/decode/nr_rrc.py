@@ -22,17 +22,29 @@ from .records import DecodedMessage
 
 HDR_A = Layout("A", "<BBBHIHBIH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "arfcn", "sfn_subfn", "pdu_num", "sib_mask", "length"))
 HDR_B = Layout("B", "<BBBHIIBIH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "arfcn", "sfn_subfn", "pdu_num", "sib_mask", "length"))
-CANDIDATES = (HDR_A, HDR_B)
+# HDR_N26: the iPhone 17 (M25 modem), packet version 26, 35 bytes with the
+# version. Between the PCI and the NR-ARFCN sit eight bytes that carry the cell
+# global identity (NCGI): they are consumed, never output. A 3-byte frame/slot
+# field, and four reserved bytes after the length. Verified on the recovered
+# QDSS trace: the length fits in 7 of 7 records.
+HDR_N26 = Layout("N26", "<BBBH8sI3sBIH4s", ("rrc_rel", "rrc_ver", "rb_id", "pci", "ncgi", "arfcn",
+                                           "sfn_subfn", "pdu_num", "sib_mask", "length", "reserved4"))
+CANDIDATES = (HDR_A, HDR_B, HDR_N26)
 
 VERSION_TABLE = {
     7: HDR_A, 9: HDR_A, 12: HDR_A, 14: HDR_A,
-    15: HDR_B, 17: HDR_B, 19: HDR_B, 23: HDR_B, 25: HDR_B, 26: HDR_B, 27: HDR_B,
+    15: HDR_B, 17: HDR_B, 19: HDR_B, 23: HDR_B, 25: HDR_B, 27: HDR_B,
+    26: HDR_N26,
 }
 
 PDU_MAP = {
     1: "BCCH_BCH", 2: "BCCH_DL_SCH", 3: "DL_CCCH", 4: "DL_DCCH", 5: "PCCH",
     6: "UL_CCCH", 7: "UL_CCCH1", 8: "UL_DCCH",
     9: "RRC_RECONFIGURATION", 10: "RRC_RECONFIGURATION_COMPLETE",
+    # Version 26 numbers the EN-DC containers 11 and 12, and logs the
+    # RadioBearerConfig of an SCG addition on its own as 36.
+    11: "RRC_RECONFIGURATION", 12: "RRC_RECONFIGURATION_COMPLETE",
+    36: "RADIO_BEARER_CONFIG",
 }
 
 VERSION_OFFSET = 4
@@ -60,6 +72,9 @@ def decode(rec: LogRecord, info=None) -> Optional[DecodedMessage]:
     }
     if match.layout is HDR_A:
         fields["sfn"], fields["subfn"] = sfn_subfn_u16(f["sfn_subfn"])
+    elif isinstance(f["sfn_subfn"], bytes):
+        # HDR_N26's 3-byte frame/slot field: the packing is not confirmed either.
+        fields["sfn_subfn_raw"] = int.from_bytes(f["sfn_subfn"], "little")
     else:
         # 32-bit frame field: the packing is not confirmed, keep it raw.
         fields["sfn_subfn_raw"] = f["sfn_subfn"]

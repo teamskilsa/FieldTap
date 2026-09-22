@@ -55,8 +55,15 @@ LOG_CODES = {i.code: i for i in (
     _c(0xB0EE, "LTE NAS EMM State", "lte", "other"),
     _c(0xB0EF, "LTE NAS EMM USIM Card Mode", "lte", "other"),
     # --- LTE MAC / PHY: captured for the corpus, not decoded -------------------------------
-    _c(0xB061, "LTE MAC UL Transport Block", "lte", "mac"),
+    # Names as MobileInsight's log-code table (Apache-2.0) gives them; the iPhone 17's
+    # QDSS trace carries every one of these codes.
+    _c(0xB061, "LTE MAC RACH Trigger", "lte", "mac"),
+    _c(0xB062, "LTE MAC RACH Attempt", "lte", "mac"),
     _c(0xB063, "LTE MAC DL Transport Block", "lte", "mac"),
+    _c(0xB064, "LTE MAC UL Transport Block", "lte", "mac"),
+    _c(0xB139, "LTE PHY PUSCH Tx Report", "lte", "meas"),
+    _c(0xB14D, "LTE PHY PUCCH CSF", "lte", "meas"),
+    _c(0xB14E, "LTE PHY PUSCH CSF", "lte", "meas"),
     _c(0xB16B, "LTE PHY PDCCH-PHICH Indication Report", "lte", "meas"),
     _c(0xB173, "LTE PDSCH Stat Indication", "lte", "meas"),
     _c(0xB179, "LTE ML1 Connected Mode LTE Intra-Freq Meas Results", "lte", "meas",
@@ -69,14 +76,15 @@ LOG_CODES = {i.code: i for i in (
             "32-bit words at version-specific offsets that no non-GPL source pins down, so no "
             "parser here yet. Confirm offsets on a hardware capture first - see "
             "docs/research/qualcomm-measurement-log-layouts.md"),
-    _c(0xB195, "LTE ML1 Neighbor Measurements", "lte", "meas"),
+    _c(0xB195, "LTE ML1 Connected Neighbor Meas Request/Response", "lte", "meas"),
     # --- NR RRC ---------------------------------------------------------------------
     _c(0xB821, "NR RRC OTA Packet", "nr", "rrc", "nr_rrc", "medium",
        note="Header layout self-validated against the record length field"),
     _c(0xB822, "NR RRC MIB Info", "nr", "cell"),
     _c(0xB823, "NR RRC Serving Cell Info", "nr", "cell"),
     _c(0xB825, "NR RRC Configuration Info", "nr", "other"),
-    _c(0xB826, "NR RRC PLMN Search Info", "nr", "other"),
+    _c(0xB826, "NR5G RRC Supported CA Combos", "nr", "other",
+       note="Not a PLMN search record, as this register had it; the iPhone 17 trace holds 610 in 27 s"),
     # --- NR NAS ---------------------------------------------------------------------
     _c(0xB800, "NR NAS SM5G Plain OTA Incoming Msg", "nr", "nas", "nas", "medium", ("5gsm", "dl", "plain")),
     _c(0xB801, "NR NAS SM5G Plain OTA Outgoing Msg", "nr", "nas", "nas", "medium", ("5gsm", "ul", "plain")),
@@ -86,14 +94,16 @@ LOG_CODES = {i.code: i for i in (
        note="code/direction pairing not confirmed on hardware"),
     _c(0xB80A, "NR NAS MM5G Plain OTA Incoming Msg", "nr", "nas", "nas", "medium", ("5gmm", "dl", "plain")),
     _c(0xB80B, "NR NAS MM5G Plain OTA Outgoing Msg", "nr", "nas", "nas", "medium", ("5gmm", "ul", "plain")),
-    _c(0xB80C, "NR NAS MM5G Security Protected Incoming Msg", "nr", "nas", "nas", "low", ("5gmm", "dl", "sec"),
-       note="code/direction pairing not confirmed on hardware"),
+    _c(0xB80C, "NR NAS MM5G State", "nr", "nas", "nas", "low", ("5gmm", "dl", "sec"),
+       note="A 5GMM state record, not a message: MobileInsight, SCAT and DiagNG agree, and the one "
+            "record in the iPhone 17 trace is state-shaped. Still offered to the NAS locator, "
+            "which finds no NAS in a real one (counted unparsed, no frame), so the synthetic "
+            "corpus's 0xB80C message decodes as before"),
     _c(0xB80D, "NR NAS MM5G Security Protected Outgoing Msg", "nr", "nas", "nas", "low", ("5gmm", "ul", "sec"),
        note="seen in the Jul 2024 QCAT export as an MM5G log; direction unconfirmed"),
-    _c(0xB80E, "NR NAS MM5G State", "nr", "other",
-       note="Number unconfirmed: two open decoders place the 5GMM state record at 0xB80C, "
-            "which this register assigns to a security-protected MM5G message. One of the two "
-            "is wrong - resolve on a hardware capture before trusting either"),
+    _c(0xB80E, "NR NAS MM5G (unconfirmed)", "nr", "other",
+       note="Listed here as the MM5G state record until the open decoders and an iPhone capture "
+            "put that at 0xB80C; what 0xB80E carries is unconfirmed"),
     _c(0xB80F, "NR NAS MM5G Service Request", "nr", "other"),
     _c(0xB814, "NR NAS SM5G State", "nr", "other"),
     # --- NR ML1: captured for the corpus, not decoded ----------------------------------------

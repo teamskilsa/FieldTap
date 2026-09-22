@@ -153,6 +153,16 @@ class CallFlowPresentationTest {
     }
 
     @Test
+    fun aPendingNrCellSaysSo() {
+        // An NR RRC header logged before the SCG cell is assigned carries PCI 0xFFFF or NR-ARFCN 0xFFFFFFFF (the
+        // iPhone's first EN-DC reconfiguration); it is no PCI 65535.
+        assertEquals("NR cell pending", CallFlowPresentation.shortCell(CallFlow.Cell(0xFFFF_FFFFL, 0xFFFF, nr = true)))
+        assertEquals("NR cell pending", CallFlowPresentation.shortCell(CallFlow.Cell(174_770, 0xFFFF, nr = true)))
+        assertEquals("NR cell pending", CallFlowPresentation.shortCell(CallFlow.Cell(0xFFFF_FFFFL, 80, nr = true)))
+        assertEquals("NR PCI 80", CallFlowPresentation.shortCell(CallFlow.Cell(174_770, 80, nr = true)))
+    }
+
+    @Test
     fun timesAndSpans() {
         assertEquals("0:00.064", CallFlowPresentation.sinceStart(63.771))
         assertEquals("1:58.338", CallFlowPresentation.sinceStart(118_338.425))

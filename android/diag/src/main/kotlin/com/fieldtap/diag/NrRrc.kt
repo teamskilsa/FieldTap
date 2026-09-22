@@ -77,11 +77,17 @@ object NrRrc {
     /** SM8450, packet version 17: five bytes of cell identity before the ARFCN, and a wider tail. */
     private val C = Layout("C", 27) { b, o -> Raw(u8(b, o + 2), u16(b, o + 3), u32(b, o + 13), u8(b, o + 20), u16(b, o + 25)) }
 
-    private val LAYOUTS = listOf(C, B, A)
+    /**
+     * iPhone 17 (M25 modem), packet version 26: C plus four reserved bytes after the length, 35 bytes with the
+     * version. The length fits in 7 of 7 records of the recovered QDSS trace (contract v1, D2).
+     */
+    private val E = Layout("E", 31) { b, o -> Raw(u8(b, o + 2), u16(b, o + 3), u32(b, o + 13), u8(b, o + 20), u16(b, o + 25)) }
+
+    private val LAYOUTS = listOf(E, C, B, A)
 
     private val VERSIONS = mapOf(
         7 to A, 9 to A, 12 to A, 14 to A,
-        15 to B, 19 to B, 23 to B, 25 to B, 26 to B,
+        15 to B, 19 to B, 23 to B, 25 to B, 26 to E,
         17 to C, 27 to C,
     )
 
@@ -89,6 +95,9 @@ object NrRrc {
         1 to Channel.BCCH_BCH, 2 to Channel.BCCH_DL_SCH, 3 to Channel.DL_CCCH, 4 to Channel.DL_DCCH,
         5 to Channel.PCCH, 6 to Channel.UL_CCCH, 7 to Channel.UL_CCCH1, 8 to Channel.UL_DCCH,
         9 to Channel.RRC_RECONFIGURATION, 10 to Channel.RRC_RECONFIGURATION_COMPLETE,
+        // Version 26 (iPhone 17) numbers the same EN-DC containers 11 and 12. Its PDU 36, RadioBearerConfig,
+        // stays unmapped until contract v2, so the Android and iPhone call flows count it the same way.
+        11 to Channel.RRC_RECONFIGURATION, 12 to Channel.RRC_RECONFIGURATION_COMPLETE,
     )
 
     private const val VERSION_SIZE = 4

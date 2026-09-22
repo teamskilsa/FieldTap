@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "tasks": {
+    "check": "deno check --config deno.browser.json src/ && deno check --config deno.lovable.json src/types.ts && deno check tests/ tools/",
+    "test": "deno test -A tests/"
+  },
+  "fmt": {
+    "lineWidth": 120,
+    "indentWidth": 2,
+    "singleQuote": true,
+    "semiColons": true
+  }
+}

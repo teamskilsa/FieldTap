@@ -167,9 +167,12 @@ Owning the domain helps more than expected.
   whoever has more installs.
 - For the real buyer, an operator or integrator with a device fleet, **managed
   distribution** is the right channel and sidesteps most of this.
-- **iOS is a dead end** for anything but an enterprise-provisioned build. There is
-  no public interface for cell measurements, and the jailbreak route now covers
-  only pre-2018 hardware.
+- **iOS has no live route, but it has an after-the-fact one.** There is still no
+  public interface for cell measurements, and the jailbreak route covers only
+  pre-2018 hardware. But with Apple's own Baseband logging profile, a stock
+  iPhone's sysdiagnose carries the modem's DIAG trace, which FieldTap turns into a
+  `.qmdl` and decodes: see
+  [`research/iphone-baseband-capture.md`](research/iphone-baseband-capture.md).
 
 ---
 
@@ -192,5 +195,7 @@ happens to sit exactly where the legal one does.
 **5. Price against RantCell, not against the free apps.** Their $320 per device
 per year buys no layer 3. That is the sentence the sales deck is built on.
 
-**Not on the plan:** an app that does the capturing, an iOS consumer app, and
+**Not on the plan:** an app that does the capturing, an iOS app that measures
+live (the iPhone app imports a sysdiagnose after the fact; see
+[`research/iphone-baseband-capture.md`](research/iphone-baseband-capture.md)), and
 competing with Ookla on scale.

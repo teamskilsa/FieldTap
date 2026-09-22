@@ -1,5 +1,6 @@
 package com.fieldtap.diag
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -152,5 +153,29 @@ class LteRrcTest {
     fun aRecordTooShortForAnyHeaderIsNotDecoded() {
         assertEquals(null, LteRrc.decode(ByteArray(5)))
         assertNotNull(rrc.first().payload)
+    }
+
+    @Test
+    fun version30HeaderIsLayoutE() {
+        // iPhone 17 (M25 modem): the version-27 header plus three bytes after the length, 24 bytes with the version.
+        // Read as layout D, those three bytes would lead the PDU and the message would not be named.
+        val pdu = hex("2801")
+        val body = ByteArray(24) + pdu
+        body[0] = 30
+        fun put(at: Int, v: Long, width: Int) {
+            for (i in 0 until width) body[1 + at + i] = (v ushr (8 * i)).toByte()
+        }
+        put(5, 235, 2)
+        put(7, 5110, 4)
+        put(13, 9, 1)
+        put(18, pdu.size.toLong(), 2)
+        put(20, 0xA5A5A5, 3)
+        val message = LteRrc.decode(body)!!
+        assertEquals(30, message.packetVersion)
+        assertEquals(235, message.pci)
+        assertEquals(5110L, message.earfcn)
+        assertEquals(LteRrc.Channel.DL_DCCH, message.channel)
+        assertEquals("rrcConnectionRelease", message.asn1Name)
+        assertArrayEquals(pdu, message.payload)
     }
 }

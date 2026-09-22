@@ -2,10 +2,11 @@
 
 Record body:  packet_version(u8)  header(layout by version)  RRC PDU
 
-Three header layouts are known across modem generations; they differ in the
-width of the EARFCN and in whether a SIB mask is present. The PDU-number to
-channel mapping also changed three times. Both tables are keyed on the
-packet version and both are self-checked (see layout.py).
+Five header layouts are known across modem generations; they differ in the
+width of the EARFCN, in whether a SIB mask is present, and in bytes the newer
+modems add around it. The PDU-number to channel mapping also changed three
+times. Both tables are keyed on the packet version and both are self-checked
+(see layout.py).
 """
 
 from __future__ import annotations
@@ -29,7 +30,13 @@ HDR_C = Layout("C", "<BBBHIHBIH", ("rrc_rel", "rrc_ver", "rb_id", "pci", "earfcn
 # either, but they must be consumed or PCI, EARFCN and pdu_num all shift.
 HDR_D = Layout("D", "<BBBHHIHBIH", ("rrc_rel", "rrc_ver", "nr_rrc_rel", "unknown_u16",
                                     "pci", "earfcn", "sfn_subfn", "pdu_num", "sib_mask", "length"))
-CANDIDATES = (HDR_A, HDR_B, HDR_C, HDR_D)
+# HDR_E30: the iPhone 17 (M25 modem), packet version 30. HDR_D followed by three
+# bytes after the length, 24 bytes with the version byte; PDU numbering is map D.
+# Verified on the recovered QDSS trace: the length field equals the bytes that
+# follow in 100 of 100 records. The three trailing bytes are not interpreted.
+HDR_E30 = Layout("E30", "<BBBHHIHBIH3s", ("rrc_rel", "rrc_ver", "nr_rrc_rel", "unknown_u16", "pci", "earfcn",
+                                          "sfn_subfn", "pdu_num", "sib_mask", "length", "reserved3"))
+CANDIDATES = (HDR_A, HDR_B, HDR_C, HDR_D, HDR_E30)
 
 PDU_MAP_A = {1: "BCCH_BCH", 2: "BCCH_DL_SCH", 3: "MCCH", 4: "PCCH",
              5: "DL_CCCH", 6: "DL_DCCH", 7: "UL_CCCH", 8: "UL_DCCH"}
@@ -55,6 +62,7 @@ VERSION_TABLE = {
     # handset has been seen emitting it. resolve_header probes anyway, so a real
     # v26 device that uses the longer header still decodes.
     27: (HDR_D, "D"),
+    30: (HDR_E30, "D"),
 }
 
 

@@ -1,0 +1,10 @@
+# Build output and anything a local run writes. Capture-derived data never lives here: fixtures are read from
+# $FT_FIXTURES (default ios/Fixtures/local) in place.
+dist/
+out/
+*.qmdl
+*.bin
+*.stub
+*.tar.gz
+coverage/
+.golden/

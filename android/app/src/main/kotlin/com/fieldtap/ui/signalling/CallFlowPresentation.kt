@@ -157,6 +157,8 @@ object CallFlowPresentation {
 
     /** "B3 PCI 3", "NR PCI 417", or "EARFCN 70000 PCI 3" when an LTE band is unknown. */
     fun shortCell(cell: CallFlow.Cell): String = when {
+        // Contract v1 (D4): an NR RRC header logged before the SCG cell is assigned carries 0xFFFF / 0xFFFFFFFF.
+        cell.nr && (cell.pci == 0xFFFF || cell.earfcn == 0xFFFFFFFFL) -> "NR cell pending"
         cell.nr -> "NR PCI ${cell.pci}"
         else -> "${band(cell) ?: "EARFCN ${cell.earfcn}"} PCI ${cell.pci}"
     }

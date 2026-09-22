@@ -1,0 +1,13 @@
+# Capture-derived fixtures, screenshots and anything else built from the user's iPhone trace.
+# They hold identifiers (IMSI/IMEI, phone number, IPs) or data derived from them. Never commit.
+Fixtures/local/
+
+# Kotlin v1 sources used only to regenerate the goldens locally (run-kotlin-golden.sh).
+Contract/src-v1/
+
+# Build products
+DerivedData/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate

@@ -1,0 +1,32 @@
+--- src/CallFlow.kt	2026-09-22 02:00:39
++++ src-v1/CallFlow.kt	2026-09-22 02:01:13
+@@ -697,6 +697,9 @@
+         }
+         for (event in events) {
+             for (o in open.toList()) {
++                // Contract v1 (D3): a procedure is answered only on the RAT it started on. On EN-DC the NR
++                // RRCReconfiguration rides inside the LTE one; without this it closed the LTE one as unanswered.
++                if (o.start.rat != event.rat) continue
+                 when (event.key) {
+                     in o.rule.succeeds -> close(o, event, Outcome.SUCCEEDED)
+                     in o.rule.fails -> close(o, event, Outcome.FAILED)
+@@ -704,7 +707,7 @@
+             }
+             val rule = RULES.firstOrNull { event.key in it.starts } ?: continue
+             // A second start before the first was answered: the first never was.
+-            open.filter { it.rule === rule }.forEach { close(it, it.start, Outcome.UNANSWERED) }
++            open.filter { it.rule === rule && it.start.rat == event.rat }.forEach { close(it, it.start, Outcome.UNANSWERED) }
+             val name = if (rule.name == RECONFIGURATION && event.isHandoverCommand) "Handover" else rule.name
+             val started = Open(rule, name, event)
+             open += started
+--- src/CallFlowPresentation.kt	2026-09-22 02:00:39
++++ src-v1/CallFlowPresentation.kt	2026-09-22 02:01:13
+@@ -157,6 +157,8 @@
+ 
+     /** "B3 PCI 3", "NR PCI 417", or "EARFCN 70000 PCI 3" when an LTE band is unknown. */
+     fun shortCell(cell: CallFlow.Cell): String = when {
++        // Contract v1 (D4): an NR RRC header logged before the SCG cell is assigned carries 0xFFFF / 0xFFFFFFFF.
++        cell.nr && (cell.pci == 0xFFFF || cell.earfcn == 0xFFFFFFFFL) -> "NR cell pending"
+         cell.nr -> "NR PCI ${cell.pci}"
+         else -> "${band(cell) ?: "EARFCN ${cell.earfcn}"} PCI ${cell.pci}"
+     }

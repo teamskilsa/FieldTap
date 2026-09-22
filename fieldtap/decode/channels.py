@@ -71,6 +71,9 @@ NR_CHANNELS = {c.key: c for c in (
     _nr("RRC_RECONFIGURATION", "RRCReconfiguration (container)", "dl", "nr-rrc.rrc_reconf"),
     # Wireshark 4.0 has no standalone dissector for RRCReconfigurationComplete.
     _nr("RRC_RECONFIGURATION_COMPLETE", "RRCReconfigurationComplete (container)", "ul", "data"),
+    # EN-DC SCG addition: the RadioBearerConfig inside the LTE reconfiguration's
+    # nr-RadioBearerConfig1, logged on its own (iPhone 17, NR RRC version 26).
+    _nr("RADIO_BEARER_CONFIG", "RadioBearerConfig (container)", "dl", "nr-rrc.radiobearerconfig"),
     _nr("UE_MRDC_CAPABILITY", "UE-MRDC-Capability", "ul", "nr-rrc.ue_mrdc_cap"),
     _nr("UE_NR_CAPABILITY", "UE-NR-Capability", "ul", "nr-rrc.ue_nr_cap"),
     _nr("UE_RADIO_ACCESS_CAP_INFO", "UERadioAccessCapabilityInformation", "ul", "nr-rrc.ue_radio_access_cap_info"),

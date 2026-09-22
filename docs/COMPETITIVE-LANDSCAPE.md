@@ -61,6 +61,41 @@ RF engineers already trust. Matching its decode fidelity is table stakes.
 **Boxes this undercuts:** Amarisoft UE Simbox, Keysight UXM, Anritsu MT8000A, R&S CMX500 —
 and Simnovus's own UESIM. Worth being deliberate about that last one.
 
+## iPhone
+
+iOS gives apps no live cell data (Apple DTS: no supported low-level cellular access), so every iPhone route is
+either a vendor arrangement with Apple or a modem trace taken out of a sysdiagnose after the fact.
+
+| Tool | iPhone support | How it gets the data |
+| --- | --- | --- |
+| TEMS Investigation / Paragon (Infovista) | Data-service tests, logging, VoLTE SIP, RAT/band lock on some models (iPhone 8 to 12 in 22.3); iPhone 16 in 26.2, iPhone 17 series in 27.2. The free TEMS OnDevice app runs data tests only | Not published. The product description says iPhones ship with an iOS version enabled for TEMS, under an "Apple" connect licence: partner access, by all appearances |
+| R&S ROMES4 with the ROMES Probe app | Claims full Qualcomm chipset logging, L1 and L3, mobility procedures | Not published |
+| XCAL-iSolo (Innowireless / Accuver) | App Store, needs a licence; "DM messages and RF values", NR SCG view, PCAP saving | Not published |
+| Keysight Nemo | The NATA app: FTP, HTTP, ping and GPS only; Nemo Handy lists no Apple devices | — |
+| NSG, QualiPoc, G-NetTrack, Cellular-Z | Android only | — |
+| CellGuard (TU Darmstadt research app, TestFlight) | Apple's Baseband profile, then a sysdiagnose shared into the app | The modem's control messages (QMI/ARI) in the system log, not the QDSS DIAG trace |
+| SCAT, QCSuper, MobileInsight | No iPhone input; SCAT's wiki says `.qdss` is not supported | — |
+
+**The sysdiagnose route, FieldTap's.** The user installs Apple's own Baseband logging profile (7 days, free,
+Settings only: it cannot ship in an app), presses the sysdiagnose buttons, reproduces the problem 20 to 40 s
+later and shares the archive. FieldTap rebuilds the modem's QDSS trace into a `.qmdl` and decodes RRC and NAS
+with the same decoders as the Android captures. One capture measured so far: about 27 s of trace, 19 to 46 s
+after the press; 92,133 log records, of which 128 call-flow events. No public tool was found that does this;
+that is an absence of evidence, not proof. The trade against the licensed suites: no partner access and no
+licence fee, but after the fact only, about 27 s per sysdiagnose, and the modem-encrypted NR physical-layer
+records unreadable (23,764 in that capture). Details and sources:
+[`research/iphone-baseband-capture.md`](research/iphone-baseband-capture.md).
+
+Sources: TEMS Investigation 22.3 product description
+(https://infocom.haradacorp.co.jp/wp/wp-content/uploads/2020/10/TEMS-Investigation-22.3-Technical-Product-Description.pdf),
+TEMS newsletter November 2025 (https://www.infovista.com/products/tems-suite/mobile-network-testing/newsletter/2025/11),
+TEMS OnDevice (https://apps.apple.com/us/app/tems-ondevice/id1548649639), ROMES4
+(https://www.rohde-schwarz.com/us/products/test-and-measurement/network-data-collection/rs-romes4-drive-test-software_63493-8650.html),
+ROMES Probe (https://apps.apple.com/app/id6445962802), XCAL-iSolo (https://apps.apple.com/us/app/xcal-isolo/id1645003816),
+Nemo NATA (https://apps.apple.com/us/app/nemo-active-testing-app/id1600487632), Nemo Handy flyer
+(https://www.keysight.com/us/en/assets/7018-05575/flyers/5992-2050.pdf), CellGuard (https://cellguard.seemoo.de/docs/install/),
+SCAT (https://github.com/fgsect/scat/wiki/Baseband-Dumps), Apple DTS (https://developer.apple.com/forums/thread/751785).
+
 ## Where FieldTap fits
 
 Structurally on NSG's side of the line — root, diag, decode — but currently missing three

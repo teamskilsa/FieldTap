@@ -1,0 +1,109 @@
+--- a/android/diag/src/main/kotlin/com/fieldtap/diag/CallFlow.kt
++++ b/android/diag/src/main/kotlin/com/fieldtap/diag/CallFlow.kt (contract v1)
+@@ -193,12 +193,25 @@
+         var count = 0
+         var firstRaw = 0L
+         var lastRaw = 0L
++        var firstAny = 0L
++        var lastAny = 0L
++        var firstPlausible = 0L
++        var lastPlausible = 0L
+ 
+         fun add(record: LogRecord) {
+             count++
++            // Golden-fixture patch: iPhone captures begin with records stamped before the modem had network
++            // time. Measure from the first plausible (post-2005) timestamp when there is one; otherwise, as
++            // before, from the first non-zero one.
+             if (record.timestampRaw > 0) {
+-                if (firstRaw == 0L) firstRaw = record.timestampRaw
+-                lastRaw = record.timestampRaw
++                if (firstAny == 0L) firstAny = record.timestampRaw
++                lastAny = record.timestampRaw
++                if (utcMs(record.timestampRaw) != null) {
++                    if (firstPlausible == 0L) firstPlausible = record.timestampRaw
++                    lastPlausible = record.timestampRaw
++                }
++                firstRaw = if (firstPlausible != 0L) firstPlausible else firstAny
++                lastRaw = if (firstPlausible != 0L) lastPlausible else lastAny
+             }
+             val category = LogCodes.of(record.code)?.category
+             if (category == LogCodes.Category.NAS || category == LogCodes.Category.RRC || record.code == SERVING_CELL_INFO) {
+@@ -684,6 +697,9 @@
+         }
+         for (event in events) {
+             for (o in open.toList()) {
++                // Contract v1 (D3): a procedure is answered only on the RAT it started on. On EN-DC the NR
++                // RRCReconfiguration rides inside the LTE one; without this it closed the LTE one as unanswered.
++                if (o.start.rat != event.rat) continue
+                 when (event.key) {
+                     in o.rule.succeeds -> close(o, event, Outcome.SUCCEEDED)
+                     in o.rule.fails -> close(o, event, Outcome.FAILED)
+@@ -691,7 +707,7 @@
+             }
+             val rule = RULES.firstOrNull { event.key in it.starts } ?: continue
+             // A second start before the first was answered: the first never was.
+-            open.filter { it.rule === rule }.forEach { close(it, it.start, Outcome.UNANSWERED) }
++            open.filter { it.rule === rule && it.start.rat == event.rat }.forEach { close(it, it.start, Outcome.UNANSWERED) }
+             val name = if (rule.name == RECONFIGURATION && event.isHandoverCommand) "Handover" else rule.name
+             val started = Open(rule, name, event)
+             open += started
+--- a/android/diag/src/main/kotlin/com/fieldtap/diag/LteRrc.kt
++++ b/android/diag/src/main/kotlin/com/fieldtap/diag/LteRrc.kt (contract v1)
+@@ -67,7 +67,10 @@
+     /** HDR_D: C with three more bytes before the PCI (a release byte and an unexplained u16). SM8450, version 27. */
+     private val D = Layout("D", 20) { b, o -> Raw(u16(b, o + 5), u32(b, o + 7), u16(b, o + 11), u8(b, o + 13), u16(b, o + 18)) }
+ 
+-    private val LAYOUTS = listOf(A, B, C, D)
++    /** v30 (iPhone 17 / M25 modem): D plus three trailing bytes. Layout from the parallel QDSS workflow (ft_v30.py). */
++    private val E = Layout("E", 23) { b, o -> Raw(u16(b, o + 5), u32(b, o + 7), u16(b, o + 11), u8(b, o + 13), u16(b, o + 18)) }
++
++    private val LAYOUTS = listOf(A, B, C, D, E)
+ 
+     private val MAP_A = mapOf(1 to Channel.BCCH_BCH, 2 to Channel.BCCH_DL_SCH, 3 to Channel.MCCH, 4 to Channel.PCCH, 5 to Channel.DL_CCCH, 6 to Channel.DL_DCCH, 7 to Channel.UL_CCCH, 8 to Channel.UL_DCCH)
+     private val MAP_B = mapOf(8 to Channel.BCCH_BCH, 9 to Channel.BCCH_DL_SCH, 10 to Channel.MCCH, 11 to Channel.PCCH, 12 to Channel.DL_CCCH, 13 to Channel.DL_DCCH, 14 to Channel.UL_CCCH, 15 to Channel.UL_DCCH)
+@@ -80,6 +83,7 @@
+         14, 15, 16 -> C to MAP_C
+         19, 26 -> C to MAP_D
+         27 -> D to MAP_D
++        30 -> E to MAP_D
+         else -> null to when {
+             version >= 19 -> MAP_D
+             version >= 14 -> MAP_C
+--- a/android/diag/src/main/kotlin/com/fieldtap/diag/NrRrc.kt
++++ b/android/diag/src/main/kotlin/com/fieldtap/diag/NrRrc.kt (contract v1)
+@@ -77,11 +77,14 @@
+     /** SM8450, packet version 17: five bytes of cell identity before the ARFCN, and a wider tail. */
+     private val C = Layout("C", 27) { b, o -> Raw(u8(b, o + 2), u16(b, o + 3), u32(b, o + 13), u8(b, o + 20), u16(b, o + 25)) }
+ 
+-    private val LAYOUTS = listOf(C, B, A)
++    /** v26 (iPhone 17 / M25 modem): C plus four trailing reserved bytes (35-byte header incl. version). Golden-fixture patch only. */
++    private val E = Layout("E", 31) { b, o -> Raw(u8(b, o + 2), u16(b, o + 3), u32(b, o + 13), u8(b, o + 20), u16(b, o + 25)) }
++
++    private val LAYOUTS = listOf(E, C, B, A)
+ 
+     private val VERSIONS = mapOf(
+         7 to A, 9 to A, 12 to A, 14 to A,
+-        15 to B, 19 to B, 23 to B, 25 to B, 26 to B,
++        15 to B, 19 to B, 23 to B, 25 to B, 26 to E,
+         17 to C, 27 to C,
+     )
+ 
+@@ -89,6 +92,7 @@
+         1 to Channel.BCCH_BCH, 2 to Channel.BCCH_DL_SCH, 3 to Channel.DL_CCCH, 4 to Channel.DL_DCCH,
+         5 to Channel.PCCH, 6 to Channel.UL_CCCH, 7 to Channel.UL_CCCH1, 8 to Channel.UL_DCCH,
+         9 to Channel.RRC_RECONFIGURATION, 10 to Channel.RRC_RECONFIGURATION_COMPLETE,
++        11 to Channel.RRC_RECONFIGURATION, 12 to Channel.RRC_RECONFIGURATION_COMPLETE,
+     )
+ 
+     private const val VERSION_SIZE = 4
+--- a/android/app/src/main/kotlin/com/fieldtap/ui/signalling/CallFlowPresentation.kt
++++ b/android/app/src/main/kotlin/com/fieldtap/ui/signalling/CallFlowPresentation.kt (contract v1)
+@@ -157,6 +157,8 @@
+ 
+     /** "B3 PCI 3", "NR PCI 417", or "EARFCN 70000 PCI 3" when an LTE band is unknown. */
+     fun shortCell(cell: CallFlow.Cell): String = when {
++        // Contract v1 (D4): an NR RRC header logged before the SCG cell is assigned carries 0xFFFF / 0xFFFFFFFF.
++        cell.nr && (cell.pci == 0xFFFF || cell.earfcn == 0xFFFFFFFFL) -> "NR cell pending"
+         cell.nr -> "NR PCI ${cell.pci}"
+         else -> "${band(cell) ?: "EARFCN ${cell.earfcn}"} PCI ${cell.pci}"
+     }

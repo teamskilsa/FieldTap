@@ -193,12 +193,25 @@ object CallFlow {
         var count = 0
         var firstRaw = 0L
         var lastRaw = 0L
+        var firstAny = 0L
+        var lastAny = 0L
+        var firstPlausible = 0L
+        var lastPlausible = 0L
 
         fun add(record: LogRecord) {
             count++
+            // Contract v1 (D1): an iPhone trace starts with records stamped before the modem had network time,
+            // which put every event 46 years after the start. Measure from the first plausible (2005 or later)
+            // timestamp when there is one; otherwise, as before, from the first non-zero one.
             if (record.timestampRaw > 0) {
-                if (firstRaw == 0L) firstRaw = record.timestampRaw
-                lastRaw = record.timestampRaw
+                if (firstAny == 0L) firstAny = record.timestampRaw
+                lastAny = record.timestampRaw
+                if (utcMs(record.timestampRaw) != null) {
+                    if (firstPlausible == 0L) firstPlausible = record.timestampRaw
+                    lastPlausible = record.timestampRaw
+                }
+                firstRaw = if (firstPlausible != 0L) firstPlausible else firstAny
+                lastRaw = if (firstPlausible != 0L) lastPlausible else lastAny
             }
             val category = LogCodes.of(record.code)?.category
             if (category == LogCodes.Category.NAS || category == LogCodes.Category.RRC || record.code == SERVING_CELL_INFO) {
@@ -684,6 +697,9 @@ object CallFlow {
         }
         for (event in events) {
             for (o in open.toList()) {
+                // Contract v1 (D3): a procedure is answered only on the RAT it started on. On EN-DC the NR
+                // RRCReconfiguration rides inside the LTE one; without this it closed the LTE one as unanswered.
+                if (o.start.rat != event.rat) continue
                 when (event.key) {
                     in o.rule.succeeds -> close(o, event, Outcome.SUCCEEDED)
                     in o.rule.fails -> close(o, event, Outcome.FAILED)
@@ -691,7 +707,7 @@ object CallFlow {
             }
             val rule = RULES.firstOrNull { event.key in it.starts } ?: continue
             // A second start before the first was answered: the first never was.
-            open.filter { it.rule === rule }.forEach { close(it, it.start, Outcome.UNANSWERED) }
+            open.filter { it.rule === rule && it.start.rat == event.rat }.forEach { close(it, it.start, Outcome.UNANSWERED) }
             val name = if (rule.name == RECONFIGURATION && event.isHandoverCommand) "Handover" else rule.name
             val started = Open(rule, name, event)
             open += started

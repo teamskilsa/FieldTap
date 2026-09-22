@@ -1,0 +1,514 @@
+{
+ "_what": "The screens sim-verify.sh --stage full screenshots, with the launch arguments after the capture's own (-FTOpenLatest after an import, -FTFixture DIR otherwise; 'detail' marks capture pages) and the screen-report values each must show. Counts and ids only; committed.",
+ "_tokens": "@guideStatus, @needsAttention and @daysLeft are worked out by sim-verify.sh from the profile stub's RemovalDate (Fixtures/local/profile) and the Mac's clock, as GuideState.from does: the 7-day profile of Sep 21 reads 'active' until Sep 27 19:40Z, 'expiringSoon' for its last day, 'expired' after.",
+ "_design": "design.json WP7 lists 17 shots; the critique adds 'radio rach' (18). 'radio carriers' moves the cursor to 15.5 s, where the PCell and all 3 SCells are active, so the grid has something to show.",
+ "shots": [
+  {
+   "name": "captures",
+   "route": "captures",
+   "args": "-FTScreen captures",
+   "detail": false,
+   "expect": {
+    "route": "captures",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "cardCount": 1,
+     "guideStatus": "@guideStatus",
+     "latestProblems": [],
+     "latestHasTrace": true,
+     "latestHasDigest": true
+    }
+   }
+  },
+  {
+   "name": "guide",
+   "route": "guide",
+   "args": "-FTScreen guide",
+   "detail": false,
+   "expect": {
+    "route": "guide",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "status": "@guideStatus",
+     "needsAttention": "@needsAttention",
+     "daysLeft": "@daysLeft",
+     "overridden": false
+    }
+   }
+  },
+  {
+   "name": "settings",
+   "route": "settings",
+   "args": "-FTScreen settings",
+   "detail": false,
+   "expect": {
+    "route": "settings",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "revealIdentifiers": false,
+     "captureCount": 1
+    }
+   }
+  },
+  {
+   "name": "overview",
+   "route": "overview",
+   "args": "-FTScreen overview",
+   "detail": true,
+   "expect": {
+    "route": "overview",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "findingCount": 10,
+     "findingIds": {
+      "$unique": true
+     },
+     "markerCount": 13,
+     "eventCount": 128,
+     "procedureCount": 34
+    },
+    "captureId": {
+     "$present": true
+    },
+    "cursorMs": 0
+   }
+  },
+  {
+   "name": "callflow-all",
+   "route": "callflow",
+   "args": "-FTScreen callflow -FTFilter ALL",
+   "detail": true,
+   "expect": {
+    "route": "callflow",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "filter": "ALL",
+     "rowCount": 157,
+     "firstRowIds": [
+      "event-0",
+      "event-1",
+      "procedure-0",
+      "event-2",
+      "event-3"
+     ],
+     "eventCount": 128
+    },
+    "captureId": {
+     "$present": true
+    }
+   }
+  },
+  {
+   "name": "callflow-nas",
+   "route": "callflow",
+   "args": "-FTScreen callflow -FTFilter NAS",
+   "detail": true,
+   "expect": {
+    "route": "callflow",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "filter": "NAS",
+     "rowCount": 29,
+     "firstRowIds": [
+      "procedure-0",
+      "event-2",
+      "event-3",
+      "procedure-1",
+      "event-10"
+     ],
+     "eventCount": 128
+    },
+    "captureId": {
+     "$present": true
+    }
+   }
+  },
+  {
+   "name": "message-82",
+   "route": "message",
+   "args": "-FTScreen message -FTEvent 82",
+   "detail": true,
+   "expect": {
+    "route": "message",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "event": 82,
+     "key": "rrcConnectionReconfiguration",
+     "layer": "RRC",
+     "rat": "lte",
+     "uplink": false,
+     "masked": true,
+     "bytesVisible": false
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "82",
+    "cursorMs": 15039.542
+   }
+  },
+  {
+   "name": "message-18",
+   "route": "message",
+   "args": "-FTScreen message -FTEvent 18",
+   "detail": true,
+   "expect": {
+    "route": "message",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "event": 18,
+     "key": "Identity response",
+     "layer": "NAS",
+     "rat": "lte",
+     "uplink": true,
+     "masked": true,
+     "bytesVisible": false,
+     "pduPresent": true
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "18",
+    "cursorMs": 2699.093
+   }
+  },
+  {
+   "name": "radio-signal",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection signal",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "signal",
+     "metrics": [
+      "lte_rsrp_per_rx",
+      "lte_rsrp_filtered",
+      "lte_rsrq_filtered",
+      "lte_rssi",
+      "lte_neighbour_rsrp"
+     ],
+     "sampleCounts": [
+      2420,
+      1945,
+      1945,
+      1945,
+      475
+     ],
+     "chartCount": 5,
+     "versionMisses": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "signal"
+   }
+  },
+  {
+   "name": "radio-dl",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection dl",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "dl",
+     "metrics": [
+      "lte_dl_mcs",
+      "lte_dl_modulation",
+      "lte_dl_prb",
+      "lte_dl_tbs",
+      "lte_dl_layers",
+      "lte_dl_bler",
+      "lte_dl_phy_throughput"
+     ],
+     "sampleCounts": [
+      3303,
+      3303,
+      3303,
+      3303,
+      2390,
+      35,
+      35
+     ],
+     "chartCount": 7,
+     "versionMisses": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "dl"
+   }
+  },
+  {
+   "name": "radio-ul",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection ul",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "ul",
+     "metrics": [
+      "lte_ul_prb",
+      "lte_ul_tbs",
+      "lte_ul_modulation",
+      "lte_ul_code_rate",
+      "lte_ul_mcs_derived",
+      "lte_pusch_tx_power_required",
+      "lte_power_headroom",
+      "lte_mac_ul_grant",
+      "lte_ul_phy_throughput"
+     ],
+     "sampleCounts": [
+      5365,
+      5365,
+      5365,
+      5365,
+      5270,
+      5365,
+      442,
+      4537,
+      27
+     ],
+     "chartCount": 9,
+     "versionMisses": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "ul"
+   }
+  },
+  {
+   "name": "radio-csi",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection csi",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "csi",
+     "metrics": [
+      "lte_cqi_wideband_cw0",
+      "lte_cqi_wideband_cw1",
+      "lte_ri",
+      "lte_pmi_wideband",
+      "lte_csf_tx_mode"
+     ],
+     "sampleCounts": [
+      2321,
+      1522,
+      2322,
+      2321,
+      1770
+     ],
+     "chartCount": 5,
+     "versionMisses": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "csi"
+   }
+  },
+  {
+   "name": "radio-nr",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection nr",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "nr",
+     "metrics": [
+      "nr_ss_rsrp",
+      "nr_ss_rsrq",
+      "nr_dl_mcs",
+      "nr_dl_prb",
+      "nr_dl_layers",
+      "nr_dl_tbs",
+      "nr_dl_bler",
+      "nr_dl_mac_throughput"
+     ],
+     "sampleCounts": [
+      40,
+      40,
+      497,
+      497,
+      497,
+      497,
+      22,
+      22
+     ],
+     "chartCount": 8,
+     "versionMisses": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "nr"
+   }
+  },
+  {
+   "name": "radio-antennas",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection antennas",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "antennas",
+     "metrics": [
+      "lte_tx_antennas_mib",
+      "lte_rx_antennas_measured",
+      "lte_rsrp_per_rx",
+      "lte_dl_layers",
+      "nr_dl_layers"
+     ],
+     "sampleCounts": [
+      5,
+      2420,
+      2420,
+      2390,
+      497
+     ],
+     "chartCount": 5,
+     "versionMisses": 0,
+     "txAntennasMib": [
+      4
+     ],
+     "rxAntennaEarfcns": 3
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "antennas"
+   }
+  },
+  {
+   "name": "radio-carriers",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection carriers -FTCursorMs 15500",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "carriers",
+     "metrics": [
+      "lte_band",
+      "lte_dl_bandwidth_prb"
+     ],
+     "sampleCounts": [
+      3,
+      5
+     ],
+     "chartCount": 2,
+     "versionMisses": 0,
+     "carriersAtCursor": 4,
+     "scellActivity": 3
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "carriers",
+    "cursorMs": 15500
+   }
+  },
+  {
+   "name": "radio-rach",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection rach",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "rach",
+     "metrics": [
+      "lte_timing_advance_rar"
+     ],
+     "sampleCounts": [
+      3
+     ],
+     "chartCount": 1,
+     "versionMisses": 0,
+     "rachCount": 3
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "rach"
+   }
+  },
+  {
+   "name": "radio-unavailable",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection unavailable",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "unavailable",
+     "metrics": [],
+     "sampleCounts": [],
+     "chartCount": 0,
+     "versionMisses": 0,
+     "availabilityCount": {
+      "$min": 1
+     }
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "unavailable"
+   }
+  },
+  {
+   "name": "overview-15040",
+   "route": "overview",
+   "args": "-FTScreen overview -FTCursorMs 15040",
+   "detail": true,
+   "expect": {
+    "route": "overview",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "findingCount": 10,
+     "pcellBandAtCursor": "B66",
+     "pscellAtCursor": false,
+     "scellsAtCursor": 0
+    },
+    "captureId": {
+     "$present": true
+    },
+    "cursorMs": 15040
+   }
+  }
+ ]
+}

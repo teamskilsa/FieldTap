@@ -5,7 +5,7 @@ package com.fieldtap.diag
  * handful of fields an engineer reads first.
  *
  * Record body: packet version (u8), a header whose layout depends on the version, then the RRC PDU (UPER).
- * Four header layouts and four PDU-number maps are known across modem generations; the version picks one,
+ * Five header layouts and four PDU-number maps are known across modem generations; the version picks one,
  * and the layout's trailing length — which must equal the bytes after it — confirms or rejects the pick.
  * This is a port of `fieldtap/decode/lte_rrc.py`, and the tests hold it to the same answers.
  *
@@ -67,7 +67,13 @@ object LteRrc {
     /** HDR_D: C with three more bytes before the PCI (a release byte and an unexplained u16). SM8450, version 27. */
     private val D = Layout("D", 20) { b, o -> Raw(u16(b, o + 5), u32(b, o + 7), u16(b, o + 11), u8(b, o + 13), u16(b, o + 18)) }
 
-    private val LAYOUTS = listOf(A, B, C, D)
+    /**
+     * HDR_E: D plus three trailing bytes after the length. iPhone 17 (M25 modem), version 30: the length equals the
+     * bytes after the header in 100 of 100 records of the recovered QDSS trace (contract v1, D2).
+     */
+    private val E = Layout("E", 23) { b, o -> Raw(u16(b, o + 5), u32(b, o + 7), u16(b, o + 11), u8(b, o + 13), u16(b, o + 18)) }
+
+    private val LAYOUTS = listOf(A, B, C, D, E)
 
     private val MAP_A = mapOf(1 to Channel.BCCH_BCH, 2 to Channel.BCCH_DL_SCH, 3 to Channel.MCCH, 4 to Channel.PCCH, 5 to Channel.DL_CCCH, 6 to Channel.DL_DCCH, 7 to Channel.UL_CCCH, 8 to Channel.UL_DCCH)
     private val MAP_B = mapOf(8 to Channel.BCCH_BCH, 9 to Channel.BCCH_DL_SCH, 10 to Channel.MCCH, 11 to Channel.PCCH, 12 to Channel.DL_CCCH, 13 to Channel.DL_DCCH, 14 to Channel.UL_CCCH, 15 to Channel.UL_DCCH)
@@ -80,6 +86,7 @@ object LteRrc {
         14, 15, 16 -> C to MAP_C
         19, 26 -> C to MAP_D
         27 -> D to MAP_D
+        30 -> E to MAP_D
         else -> null to when {
             version >= 19 -> MAP_D
             version >= 14 -> MAP_C

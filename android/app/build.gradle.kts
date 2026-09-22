@@ -117,6 +117,15 @@ java {
     }
 }
 
+// PresentationContractTest's goldens (ios/Contract/CONTRACT.md) are capture-derived and git-ignored, so their paths
+// come from the environment; unset, the test skips, and FT_REQUIRE_FIXTURES=1 makes that a failure.
+tasks.withType<Test>().configureEach {
+    providers.environmentVariable("FT_CONTRACT_DIR").orNull?.let { systemProperty("ft.contract", it) }
+    providers.environmentVariable("FT_IPHONE_QMDL").orNull?.let { systemProperty("ft.iphoneQmdl", it) }
+    providers.environmentVariable("FT_FIXTURES").orNull?.let { systemProperty("ft.fixtures", it) }
+    providers.environmentVariable("FT_REQUIRE_FIXTURES").orNull?.let { systemProperty("ft.require", it) }
+}
+
 dependencies {
     implementation(project(":core"))
     implementation(project(":diag"))
