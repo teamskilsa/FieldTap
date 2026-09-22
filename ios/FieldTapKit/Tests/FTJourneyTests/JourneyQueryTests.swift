@@ -155,4 +155,31 @@ import FTTestSupport
         #expect(j.findings.first { $0.kind == .encryptedRecords }?.text
             == "12 NR PHY records in 2 log codes were encrypted by the modem and can't be read.")
     }
+
+    /// The trace-gap wording: 0x1D0B's 1024 Hz clock says how many seconds the trace does not contain, and where,
+    /// so the finding names them instead of warning that messages "may be incomplete".
+    @Test func traceGapsAreStatedInSeconds() {
+        var f = SyntheticFlow(durationMs: 22_096)
+        f.rrc(100, "systemInformationBlockType1", "SIB1", cell: SyntheticFlow.b66, channel: "BCCH-DL-SCH")
+        let facts = CaptureFacts(traceWindowMs: 22_096, logRecords: 1, distinctCodes: 1, encrypted: .empty,
+                                 profile: nil, triggerUtc: nil)
+        // The driving capture's four gaps, as 0x1D0B measures them.
+        var phy = PhySummary.empty
+        phy.traceGaps = [TraceGap(tMs: 10_222, missingMs: 2_216), TraceGap(tMs: 10_499, missingMs: 595),
+                         TraceGap(tMs: 11_146, missingMs: 957), TraceGap(tMs: 12_364, missingMs: 1_116)]
+        let j = JourneyBuilder.build(flow: f.flow, phy: phy, facts: facts)
+        #expect(j.findings.last?.text == "Trace covers 22.1 s; 4.88 s of it was never written, in 4 gaps "
+                + "(the longest 2.22 s at 0:10.222), so messages there are missing.")
+        // One gap names its own moment, and a capture with none says nothing about gaps.
+        phy.traceGaps = [TraceGap(tMs: 1_914, missingMs: 1_182)]
+        let one = JourneyBuilder.build(flow: f.flow, phy: phy, facts: facts)
+        #expect(one.findings.last?.text == "Trace covers 22.1 s; 1.18 s of it was never written, in 1 gap "
+                + "(at 0:01.914), so messages there are missing.")
+        phy.traceGaps = []
+        let none = JourneyBuilder.build(flow: f.flow, phy: phy, facts: facts)
+        #expect(none.findings.last?.text == "Trace covers 22.1 s.")
+        // A summary from a capture without any 0x1D0B record says nothing either (traceGaps is nil, not empty).
+        #expect(JourneyBuilder.build(flow: f.flow, phy: .empty, facts: facts).findings.last?.text
+                == "Trace covers 22.1 s.")
+    }
 }

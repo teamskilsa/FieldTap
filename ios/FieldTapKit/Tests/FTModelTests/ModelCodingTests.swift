@@ -34,12 +34,17 @@ import FTTestSupport
         #expect(!p.isEmpty && PhySummary.empty.isEmpty)
     }
 
+    /// The golden is the contract for the reference extractor's 48 KPIs, which are the first 48 metrics and keep
+    /// their names; the series added after it (0xB126, 0xB12A, 0xB16C, 0xB179, 0xB063, 0x184C) are not in it.
     @Test(.fixture("contract/phy-golden.json"))
     func phyMetricsAreExactlyThePhyGoldenKeys() throws {
         let json = try JSONSerialization.jsonObject(with: Fixtures.data("contract/phy-golden.json")) as? [String: Any]
         let kpis = try #require(json?["kpis"] as? [String: Any])
-        #expect(Set(kpis.keys) == Set(PhyMetric.allCases.map(\.rawValue)))
-        #expect(PhyMetric.allCases.count == 48)
+        #expect(Set(kpis.keys) == Set(PhyMetric.referenceKpis.map(\.rawValue)))
+        #expect(PhyMetric.referenceKpis.count == 48)
+        #expect(Set(PhyMetric.addedAfterReference).isDisjoint(with: Set(PhyMetric.referenceKpis)))
+        #expect(PhyMetric.addedAfterReference.count == 22)
+        #expect(PhyMetric.allCases.count == 70)
     }
 
     @Test(.fixture("qdss-full-stats.json"))

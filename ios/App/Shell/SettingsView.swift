@@ -1,5 +1,7 @@
 import SwiftUI
 import FTApp
+import FTCore
+import FTModel
 
 /// Identifiers (masked by default; shown for one session after a confirmation), storage, privacy and about.
 struct SettingsView: View {
@@ -31,6 +33,18 @@ struct SettingsView: View {
             Section("Privacy") {
                 Label("No network. Nothing leaves this iPhone unless you share it.", systemImage: "lock.shield")
                 Label("FieldTap keeps only the modem trace from a sysdiagnose, on this iPhone.", systemImage: "internaldrive")
+                // The modem writes a GNSS position report five times a second. It is dropped when a capture is
+                // saved, which is the only moment a capture becomes a file, so it cannot reach an export.
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Location records are dropped, not stored.", systemImage: "hand.raised.fill")
+                    Text(CapturePrivacy.statement)
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("Dropped log codes: "
+                         + CapturePrivacy.excludedCodeList.map { Fmt.hex($0, width: 4) }.joined(separator: " · "))
+                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("locationExcluded")
             }
 
             Section("About") {

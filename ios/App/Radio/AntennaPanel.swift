@@ -4,9 +4,10 @@ import FTApp
 import FTModel
 import FTPhy
 
-/// Antennas and MIMO: the eNB's Tx ports (MIB), the Rx antennas the UE measured per band, the transmission mode,
-/// per-Rx RSRP at the cursor for every active carrier, how often each layer count was used, and the Rx0-Rx1
-/// imbalance.
+/// Antennas and MIMO. The measured configuration comes first, from 0xB126's own per-subframe fields — the cell's
+/// transmit antenna ports, the receive antennas in use and the MIMO rank — with the MIB's broadcast kept below it
+/// as the fallback it now is. Then the transmission mode, per-Rx RSRP at the cursor for every active carrier, how
+/// often each layer count was used, and the Rx0-Rx1 imbalance.
 struct AntennaPanel: View {
     @Bindable var session: CaptureSession
 
@@ -15,10 +16,13 @@ struct AntennaPanel: View {
     var body: some View {
         let window = session.visibleWindow
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(title: "Antennas and MIMO", source: "0xB0C1 v2 MIB, 0xB193 Rx map, 0xB14E Tx mode, 0xB173 / 0xB887 layers",
-                          session: session) { t in
+            SectionHeader(title: "Antennas and MIMO",
+                          source: "0xB126 v163 measured per subframe; 0xB0C1 v2 MIB, 0xB193 Rx map, 0xB14E Tx mode, 0xB173 / 0xB887 layers",
+                          session: session,
+                          warning: RadioData.warning(phy, checks: ["b126TxAntennaPorts", "b126Rank"])) { t in
                 Self.readouts(phy, t)
             }
+            MeasuredAntennasView(session: session)
             badges
             PerRxBars(session: session)
             layersShare(window)
@@ -27,8 +31,16 @@ struct AntennaPanel: View {
     }
 
     static func readouts(_ phy: PhyCapture, _ t: Double) -> [Readout] {
-        [
-            Readout(label: "Rx (PCell)", value: RadioFormat.int(RadioData.latest(phy, .lte_rx_antennas_measured, at: t)?.value)),
+        // The 0xB126 series carry the subframe in `tag`, which can be 0, so they are read without the
+        // serving-cell filter (that filter means "tag is not CellRole.neighbour" on the 0xB193 series).
+        let ports = RadioData.latest(phy, .lte_tx_antenna_ports, at: t, maxAge: 1_000, servingOnly: false)
+        let rx = RadioData.latest(phy, .lte_rx_antennas_used, at: t, maxAge: 1_000, servingOnly: false)
+        let rank = RadioData.latest(phy, .lte_dl_rank, at: t, maxAge: 1_000, servingOnly: false)
+        return [
+            Readout(label: "Cell Tx ports", value: RadioFormat.int(ports?.value), stale: ports == nil),
+            Readout(label: "Rx in use", value: RadioFormat.int(rx?.value), stale: rx == nil),
+            Readout(label: "Rank", value: RadioFormat.int(rank?.value), stale: rank == nil),
+            Readout(label: "Rx measured", value: RadioFormat.int(RadioData.latest(phy, .lte_rx_antennas_measured, at: t)?.value)),
             Readout(label: "LTE layers", value: RadioData.layersLabel(RadioData.latest(phy, .lte_dl_layers, at: t))),
             Readout(label: "NR layers", value: RadioFormat.int(RadioData.latest(phy, .nr_dl_layers, at: t, carrier: nil)?.value)),
         ]
@@ -41,14 +53,14 @@ struct AntennaPanel: View {
         return VStack(alignment: .leading, spacing: 8) {
             FlowRow {
                 if !s.txAntennasMib.isEmpty {
-                    BadgeView(badge: RadioBadge(text: "eNB \(s.txAntennasMib.map(String.init).joined(separator: "/")) Tx (MIB)"))
+                    BadgeView(badge: RadioBadge(text: "broadcast: eNB \(s.txAntennasMib.map(String.init).joined(separator: "/")) Tx (MIB)"))
                 }
                 if let tm { BadgeView(badge: RadioBadge(text: "TM\(tm)")) }
                 if let nrMax { BadgeView(badge: RadioBadge(text: "NR: up to \(nrMax) layers used")) }
             }
             if !s.rxAntennasByEarfcn.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("UE Rx antennas measured, PCell records per band").font(.caption.weight(.semibold))
+                    Text("UE Rx antennas measured (0xB193 Rx map), PCell records per band").font(.caption.weight(.semibold))
                     ForEach(s.rxAntennasByEarfcn.keys.sorted { (Int($0) ?? 0) < (Int($1) ?? 0) }, id: \.self) { e in
                         let counts = s.rxAntennasByEarfcn[e] ?? [:]
                         let parts = counts.keys.sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }
@@ -110,6 +122,86 @@ struct AntennaPanel: View {
                 LineMark(x: .value("t", p.t), y: .value("dB", p.y), series: .value("s", p.segment))
                     .foregroundStyle(RadioStyle.lines[2]).lineStyle(StrokeStyle(lineWidth: 1))
             }
+        }
+    }
+}
+
+
+/// The antenna configuration 0xB126 measured, per serving cell and per subframe, with its source named: this is
+/// what replaced inferring the antennas from the MIB's broadcast plus the measurement record. The MIB stays
+/// below as the fallback for a cell whose 0xB126 sub-records never named it.
+struct MeasuredAntennasView: View {
+    @Bindable var session: CaptureSession
+
+    private var phy: PhyCapture { session.analysis.phy }
+
+    var body: some View {
+        let antennas = phy.summary.antennas
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Measured").font(.subheadline.weight(.semibold))
+                if let badge = RadioData.checkBadge(phy, "b126TxAntennaPorts", passed: "matches the MIB") {
+                    BadgeView(badge: badge)
+                }
+                Spacer(minLength: 0)
+            }
+            if let a = antennas, a.subRecords > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    rows("Cell Tx antenna ports, per serving cell", cellPorts(a))
+                    rows("Rx antennas in use", share(a.rxAntennas, unit: "Rx"), badge: .medium)
+                    rows("Rank (spatial layers) per subframe", share(a.rank, unit: "layer"))
+                    Text("\(a.source), \(RadioFormat.count(a.subRecords)) subframes in this capture. Measured from the "
+                         + "record, not inferred from the broadcast.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+            } else {
+                EmptyChartNote(text: RadioData.emptyReason(phy, .lte_tx_antenna_ports)
+                    + " The antenna configuration below is the MIB's broadcast plus the 0xB193 Rx map, which is an inference.")
+            }
+        }
+        .accessibilityIdentifier("measuredAntennas")
+    }
+
+    private func rows(_ title: String, _ lines: [String], badge: RadioBadge? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(title).font(.caption.weight(.semibold))
+                if let badge { BadgeView(badge: badge) }
+            }
+            if lines.isEmpty {
+                Text("not measured in this capture").font(.caption2).foregroundStyle(.tertiary)
+            } else {
+                ForEach(lines, id: \.self) { Text($0).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    /// "B2 650/235: 4 ports in 1,043 subframes" per cell, strongest first; the MIB's own count beside it.
+    private func cellPorts(_ a: MeasuredAntennas) -> [String] {
+        a.txPortsByCell.keys.sorted().compactMap { key in
+            let counts = a.txPortsByCell[key] ?? [:]
+            let parts = counts.keys.sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }
+                .map { "\($0) port\($0 == "1" ? "" : "s") in \(RadioFormat.count(counts[$0] ?? 0))" }
+            let cell = key == "unknown" ? "no serving cell at that moment" : name(key)
+            return "\(cell): " + parts.joined(separator: ", ")
+        }
+    }
+
+    /// "B2 650/235" from the summary's "EARFCN/PCI" key.
+    private func name(_ key: String) -> String {
+        let parts = key.split(separator: "/")
+        guard parts.count == 2, let earfcn = Int64(parts[0]) else { return key }
+        return "\(RadioFormat.band(earfcn) ?? "EARFCN") \(key)"
+    }
+
+    private func share(_ counts: [String: Int], unit: String) -> [String] {
+        let total = counts.values.reduce(0, +)
+        guard total > 0 else { return [] }
+        return counts.keys.sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }.map { k in
+            let n = counts[k] ?? 0
+            return "\(k) \(unit)\(k == "1" ? "" : "s"): \(RadioFormat.count(n)) subframes (\(Int((Double(n) / Double(total) * 100).rounded()))%)"
         }
     }
 }

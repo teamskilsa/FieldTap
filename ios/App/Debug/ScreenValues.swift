@@ -149,9 +149,24 @@ enum ScreenValues {
         case "antennas":
             v["txAntennasMib"] = .numbers(phy.summary.txAntennasMib.map(Double.init))
             v["rxAntennaEarfcns"] = n(phy.summary.rxAntennasByEarfcn.count)
+            v["measuredSubRecords"] = n(phy.summary.antennas?.subRecords ?? 0)
+            v["measuredCells"] = n(phy.summary.antennas?.txPortsByCell.count ?? 0)
+        case "mac":
+            v["macBytes"] = n(phy.summary.macDl?.macBytes ?? 0)
+            v["macCoveragePercent"] = n(Int(((phy.summary.macDl?.coverage ?? 0) * 100).rounded()))
+            v["macPaddingPercent"] = n(Int(((phy.summary.macDl?.paddingShare ?? 0) * 100).rounded()))
+        case "neighbours":
+            v["neighbourRows"] = n(NeighbourTable.rows(phy, at: s.cursor.ms).count)
+            v["neighbourMeasurements"] = n(phy.series[.lte_intra_neighbour_rsrp]?.samples.count ?? 0)
+        case "ul":
+            v["liveChains"] = n(TransmitLimitedView.chains(phy, at: s.cursor.ms).count)
+            v["transmitLimited"] = .bool(TransmitLimitedView.chains(phy, at: s.cursor.ms).contains { $0.limited })
         case "unavailable":
             v["availabilityCount"] = n(phy.availability.count)
             v["catalogCount"] = n(PhyCatalog.entries.count)
+            v["excludedForPrivacy"] = n(phy.availability.count(where: { $0.status == .excludedForPrivacy }))
+            v["checksPassed"] = n(phy.checks.count(where: \.passed))
+            v["checks"] = n(phy.checks.count)
         default:
             break
         }
@@ -163,15 +178,21 @@ enum ScreenValues {
 /// phy_dashboard_design). The Radio page (WP4) draws them; the harness only counts them.
 enum RadioSections {
     static let metrics: [String: [PhyMetric]] = [
-        "signal": [.lte_rsrp_per_rx, .lte_rsrp_filtered, .lte_rsrq_filtered, .lte_rssi, .lte_neighbour_rsrp],
+        "signal": [.lte_rsrp_per_rx, .lte_rsrp_filtered, .lte_rsrq_filtered, .lte_rssi],
+        "neighbours": [.lte_neighbour_rsrp, .lte_intra_serving_rsrp, .lte_intra_neighbour_rsrp,
+                       .lte_intra_neighbour_rsrq, .lte_intra_neighbour_margin],
         "dl": [.lte_dl_mcs, .lte_dl_modulation, .lte_dl_prb, .lte_dl_tbs, .lte_dl_layers, .lte_dl_bler,
-               .lte_dl_phy_throughput],
+               .lte_dl_phy_throughput, .lte_dl_prb_allocation, .lte_cfi],
+        "mac": [.lte_mac_dl_bytes, .lte_mac_dl_padding, .lte_mac_dl_signalling_bytes, .lte_mac_dl_data_bytes],
         "ul": [.lte_ul_prb, .lte_ul_tbs, .lte_ul_modulation, .lte_ul_code_rate, .lte_ul_mcs_derived,
-               .lte_pusch_tx_power_required, .lte_power_headroom, .lte_mac_ul_grant, .lte_ul_phy_throughput],
+               .lte_pusch_tx_power_required, .lte_power_headroom, .lte_mac_ul_grant, .lte_ul_phy_throughput,
+               .lte_ul_grant_prb, .lte_ul_grant_start_rb, .lte_ul_grant_modulation, .lte_tx_power_chain,
+               .lte_tx_power_limit, .lte_tx_power_headroom, .lte_tx_pa_state],
         "csi": [.lte_cqi_wideband_cw0, .lte_cqi_wideband_cw1, .lte_ri, .lte_pmi_wideband, .lte_csf_tx_mode],
         "nr": [.nr_ss_rsrp, .nr_ss_rsrq, .nr_dl_mcs, .nr_dl_prb, .nr_dl_layers, .nr_dl_tbs, .nr_dl_bler,
                .nr_dl_mac_throughput],
-        "antennas": [.lte_tx_antennas_mib, .lte_rx_antennas_measured, .lte_rsrp_per_rx, .lte_dl_layers, .nr_dl_layers],
+        "antennas": [.lte_tx_antennas_mib, .lte_rx_antennas_measured, .lte_rsrp_per_rx, .lte_dl_layers, .nr_dl_layers,
+                     .lte_tx_antenna_ports, .lte_rx_antennas_used, .lte_dl_rank],
         "carriers": [.lte_band, .lte_dl_bandwidth_prb],
         "rach": [.lte_timing_advance_rar],
         "unavailable": [],

@@ -382,6 +382,16 @@ private struct CaptureFactsCard: View {
                 row("Overwritten", "\(o) older trace file\(o == 1 ? " was" : "s were") overwritten before the dump"
                     + (s.listedFiles.map { " (\($0 - o) of \($0) kept)" } ?? ""))
             }
+            // What the modem's own 1024 Hz clock (0x1D0B) says the trace does not contain. The record rate falls
+            // across a detach, and this is how much wall time went missing there, in seconds rather than "some
+            // messages may be incomplete".
+            if let gaps = analysis.phy.summary.traceGaps, !gaps.isEmpty {
+                let longest = gaps.max { $0.missingMs < $1.missingMs }!
+                row("Missing", "\(JourneyText.seconds(analysis.phy.summary.missingTraceMs)) was never written, in "
+                    + "\(gaps.count) gap\(gaps.count == 1 ? "" : "s") "
+                    + "(the longest \(JourneyText.seconds(longest.missingMs)) at \(JourneyText.clock(longest.tMs))). "
+                    + "Measured on the modem's own clock, so messages in those seconds are simply absent.")
+            }
             row("Records", "\(JourneyText.count(s.deframe?.logRecords ?? analysis.flow.records)) records"
                 + ((s.deframe?.distinctCodes).map { ", \($0) log codes" } ?? ""))
             row("Messages", "\(analysis.flow.events.count) RRC/NAS messages, \(analysis.flow.procedures.count) procedures")

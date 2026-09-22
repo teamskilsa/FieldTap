@@ -47,6 +47,8 @@ public final class CaptureSession: Identifiable, Hashable {
     public var visibleWindow: ClosedRange<Double>
     /// The Radio page's section chip ("signal", "dl", ...), owned by WP4's RadioPage.
     public var radioSection: String?
+    /// A catalogue entry the Not available list should scroll to (screenshots; -FTRadioEntry).
+    public var radioEntry: String?
     /// Identifiers shown for this session (only after the Settings confirmation).
     public var reveal: Bool
 

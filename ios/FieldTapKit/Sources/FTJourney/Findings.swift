@@ -5,7 +5,7 @@ import FTCore
 import FTModel
 
 public enum Findings {
-    public static func of(flow: Flow, journey: Journey, facts: CaptureFacts) -> [Finding] {
+    public static func of(flow: Flow, journey: Journey, facts: CaptureFacts, phy: PhySummary = .empty) -> [Finding] {
         var timed: [Finding] = []
         let markers = journey.markers
         let states = journey.states
@@ -90,7 +90,8 @@ public enum Findings {
         timed = timed.enumerated().sorted {
             ($0.element.tMs ?? 0, $0.offset) < ($1.element.tMs ?? 0, $1.offset)
         }.map(\.element)
-        return unique(timed + problems(flow: flow, journey: journey) + tail(flow: flow, journey: journey, facts: facts))
+        return unique(timed + problems(flow: flow, journey: journey)
+            + tail(flow: flow, journey: journey, facts: facts, phy: phy))
     }
 
     // MARK: - Tail
@@ -136,7 +137,7 @@ public enum Findings {
         }
     }
 
-    static func tail(flow: Flow, journey: Journey, facts: CaptureFacts) -> [Finding] {
+    static func tail(flow: Flow, journey: Journey, facts: CaptureFacts, phy: PhySummary) -> [Finding] {
         var out: [Finding] = []
         let failures = journey.markers.filter { $0.severity == .failure }.count
         if failures == 0 {
@@ -161,6 +162,16 @@ public enum Findings {
         var text = "Trace covers \(Fmt.fixed(window / 1_000, 1)) s"
         if let w = facts.traceWindowAfterPressMs {
             text += " (\(JourneyText.shortClock(w.startMs))–\(JourneyText.shortClock(w.endMs)) after you pressed the buttons)"
+        }
+        // The modem's own 1024 Hz clock (0x1D0B) says exactly how much wall time the trace does not contain, and
+        // where, so this says seconds instead of "some messages may be incomplete".
+        let gaps = phy.traceGaps ?? []
+        if !gaps.isEmpty {
+            let biggest = gaps.max { $0.missingMs < $1.missingMs }!
+            let where_ = gaps.count == 1 ? "at \(JourneyText.clock(biggest.tMs))"
+                : "the longest \(JourneyText.seconds(biggest.missingMs)) at \(JourneyText.clock(biggest.tMs))"
+            text += "; \(JourneyText.seconds(phy.missingTraceMs)) of it was never written, in "
+                + "\(gaps.count) gap\(gaps.count == 1 ? "" : "s") (\(where_)), so messages there are missing"
         }
         out.append(Finding(id: "traceWindow", kind: .traceWindow, severity: .info, text: text + "."))
         return out

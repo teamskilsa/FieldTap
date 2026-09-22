@@ -1,7 +1,7 @@
 {
  "_what": "The screens sim-verify.sh --stage full screenshots, with the launch arguments after the capture's own (-FTOpenLatest after an import, -FTFixture DIR otherwise; 'detail' marks capture pages) and the screen-report values each must show. Counts and ids only; committed.",
  "_tokens": "@guideStatus, @needsAttention and @daysLeft are worked out by sim-verify.sh from the profile stub's RemovalDate (Fixtures/local/profile) and the Mac's clock, as GuideState.from does: the 7-day profile of Sep 21 reads 'active' until Sep 27 19:40Z, 'expiringSoon' for its last day, 'expired' after.",
- "_design": "design.json WP7 lists 17 shots; the critique adds 'radio rach' (18). 'radio carriers' moves the cursor to 15.5 s, where the PCell and all 3 SCells are active, so the grid has something to show.",
+ "_design": "design.json WP7 lists 17 shots; the critique adds 'radio rach' (18). 'radio carriers' moves the cursor to 15.5 s, where the PCell and all 3 SCells are active, so the grid has something to show. The MAC DL section (0xB063) is the 19th shot; the DL, UL, signal and antennas sections gained the series of the decoders added after the reference extractor.",
  "shots": [
   {
    "name": "captures",
@@ -201,16 +201,20 @@
       "lte_rsrp_filtered",
       "lte_rsrq_filtered",
       "lte_rssi",
-      "lte_neighbour_rsrp"
+      "lte_neighbour_rsrp",
+      "lte_intra_neighbour_rsrp",
+      "lte_intra_neighbour_margin"
      ],
      "sampleCounts": [
       2420,
       1945,
       1945,
       1945,
-      475
+      475,
+      272,
+      272
      ],
-     "chartCount": 5,
+     "chartCount": 7,
      "versionMisses": 0
     },
     "captureId": {
@@ -237,7 +241,9 @@
       "lte_dl_tbs",
       "lte_dl_layers",
       "lte_dl_bler",
-      "lte_dl_phy_throughput"
+      "lte_dl_phy_throughput",
+      "lte_dl_prb_allocation",
+      "lte_cfi"
      ],
      "sampleCounts": [
       3303,
@@ -246,9 +252,11 @@
       3303,
       2390,
       35,
-      35
+      35,
+      2360,
+      24797
      ],
-     "chartCount": 7,
+     "chartCount": 9,
      "versionMisses": 0,
      "bottomInset": 28
     },
@@ -256,6 +264,41 @@
      "$present": true
     },
     "qualifier": "dl"
+   }
+  },
+  {
+   "name": "radio-mac",
+   "route": "radio",
+   "args": "-FTScreen radio -FTRadioSection mac",
+   "detail": true,
+   "expect": {
+    "route": "radio",
+    "rendered": true,
+    "ready": true,
+    "values": {
+     "section": "mac",
+     "metrics": [
+      "lte_mac_dl_bytes",
+      "lte_mac_dl_padding",
+      "lte_mac_dl_signalling_bytes",
+      "lte_mac_dl_data_bytes"
+     ],
+     "sampleCounts": [
+      2521,
+      2521,
+      77,
+      2430
+     ],
+     "chartCount": 4,
+     "versionMisses": 0,
+     "macBytes": 2235835,
+     "macCoveragePercent": 82,
+     "macPaddingPercent": 2
+    },
+    "captureId": {
+     "$present": true
+    },
+    "qualifier": "mac"
    }
   },
   {
@@ -278,7 +321,14 @@
       "lte_pusch_tx_power_required",
       "lte_power_headroom",
       "lte_mac_ul_grant",
-      "lte_ul_phy_throughput"
+      "lte_ul_phy_throughput",
+      "lte_ul_grant_prb",
+      "lte_ul_grant_start_rb",
+      "lte_ul_grant_modulation",
+      "lte_tx_power_chain",
+      "lte_tx_power_limit",
+      "lte_tx_power_headroom",
+      "lte_tx_pa_state"
      ],
      "sampleCounts": [
       5365,
@@ -289,10 +339,22 @@
       5365,
       442,
       4537,
-      27
+      27,
+      4763,
+      4763,
+      4762,
+      16514,
+      16514,
+      16514,
+      16514
      ],
-     "chartCount": 9,
-     "versionMisses": 0
+     "chartCount": {
+      "$min": 15
+     },
+     "versionMisses": 0,
+     "liveChains": {
+      "$min": 1
+     }
     },
     "captureId": {
      "$present": true
@@ -390,21 +452,29 @@
       "lte_rx_antennas_measured",
       "lte_rsrp_per_rx",
       "lte_dl_layers",
-      "nr_dl_layers"
+      "nr_dl_layers",
+      "lte_tx_antenna_ports",
+      "lte_rx_antennas_used",
+      "lte_dl_rank"
      ],
      "sampleCounts": [
       5,
       2420,
       2420,
       2390,
-      497
+      497,
+      2360,
+      2360,
+      2360
      ],
-     "chartCount": 5,
+     "chartCount": 8,
      "versionMisses": 0,
      "txAntennasMib": [
       4
      ],
-     "rxAntennaEarfcns": 3
+     "rxAntennaEarfcns": 3,
+     "measuredSubRecords": 2360,
+     "measuredCells": 3
     },
     "captureId": {
      "$present": true
@@ -487,6 +557,13 @@
      "versionMisses": 0,
      "availabilityCount": {
       "$min": 1
+     },
+     "excludedForPrivacy": 1,
+     "checks": {
+      "$min": 17
+     },
+     "checksPassed": {
+      "$min": 17
      }
     },
     "captureId": {

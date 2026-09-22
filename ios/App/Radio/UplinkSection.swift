@@ -4,9 +4,11 @@ import FTApp
 import FTModel
 import FTPhy
 
-/// LTE uplink from 0xB139 (PUSCH) and 0xB064 (MAC): PRB, TBS, modulation and code rate, the MCS derived from the
-/// TBS table, the required PUSCH power against Pcmax, power headroom, UL grants and the scheduled rate. BSR is
-/// not plotted: its fields are not validated yet.
+/// LTE uplink from 0xB139 (PUSCH), 0xB16C (the grant the network sent), 0x184C (the front end's own transmit
+/// power) and 0xB064 (MAC): whether the phone was transmit-limited and on which chain, what was granted against
+/// what was sent, PRB, TBS, modulation and code rate, the MCS derived from the TBS table, the required PUSCH power
+/// against Pcmax, power headroom, UL grants and the scheduled rate. BSR is not plotted: its fields are not
+/// validated yet.
 struct UplinkSection: View {
     @Bindable var session: CaptureSession
 
@@ -15,10 +17,15 @@ struct UplinkSection: View {
     var body: some View {
         let window = session.visibleWindow
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(title: "Uplink, LTE", source: "0xB139 v162 PUSCH Tx report, 0xB064 v1 / 0x08 v7 MAC UL", session: session,
-                          warning: RadioData.warning(phy, checks: ["b139TbsModulation", "b064HeaderAccounting"])) { t in
+            SectionHeader(title: "Uplink, LTE",
+                          source: "0xB139 v162 PUSCH Tx report, 0xB16C v50 uplink grant, 0x184C v17 front-end Tx AGC, 0xB064 v1 / 0x08 v7 MAC UL",
+                          session: session,
+                          warning: RadioData.warning(phy, checks: ["b139TbsModulation", "b064HeaderAccounting",
+                                                                   "b16cUlGrantFields", "d184cFraming"])) { t in
                 Self.readouts(phy, t)
             }
+            TransmitLimitedView(session: session)
+            grantedAgainstSent(window)
             points("PRB", "PRB", .lte_ul_prb, window, yDomain: 0...50)
             points("TBS", "bytes", .lte_ul_tbs, window)
             points("Modulation", "Qm", .lte_ul_modulation, window, yDomain: 1...8.5)
@@ -34,13 +41,47 @@ struct UplinkSection: View {
 
     static func readouts(_ phy: PhyCapture, _ t: Double) -> [Readout] {
         let power = RadioData.latest(phy, .lte_pusch_tx_power_required, at: t)
+        let chain = TransmitLimitedView.live(phy, at: t)
         return [
+            Readout(label: "Front-end Tx", value: RadioFormat.value(chain?.powerDbm, 1, "dBm"), stale: chain == nil),
+            Readout(label: "Headroom", value: RadioFormat.value(chain?.headroomDb, 1, "dB"), stale: chain == nil),
+            Readout(label: "Live chain", value: chain.map(TransmitLimitedView.chainName) ?? "–", stale: chain == nil),
             Readout(label: "PRB", value: RadioFormat.int(RadioData.latest(phy, .lte_ul_prb, at: t)?.value)),
             Readout(label: "MCS", value: RadioFormat.int(RadioData.latest(phy, .lte_ul_mcs_derived, at: t)?.value)),
             Readout(label: "PUSCH power", value: RadioFormat.value(power?.value, 1, "dBm"), stale: power == nil),
             Readout(label: "PHR", value: RadioFormat.value(RadioData.latest(phy, .lte_power_headroom, at: t, maxAge: 2000)?.value, 0, "dB")),
             Readout(label: "UL scheduled", value: RadioFormat.value(RadioData.bin(phy, .lte_ul_phy_throughput, at: t, carrier: nil), 2, "Mbit/s")),
         ]
+    }
+
+
+    /// What the network granted (0xB16C) against what the phone sent (0xB139), on the same axis: the uplink loop
+    /// closed. They agree subframe by subframe in the self-check, so a visible gap here is a grant the phone did
+    /// not use.
+    private func grantedAgainstSent(_ window: ClosedRange<Double>) -> some View {
+        let granted = RadioData.series(phy, .lte_ul_grant_prb)
+        let sent = RadioData.series(phy, .lte_ul_prb)
+        let pts = RadioData.joined([
+            RadioData.points(granted, window: window, series: "Granted"),
+            RadioData.points(sent, window: window, series: "Sent"),
+        ])
+        return VStack(alignment: .leading, spacing: 4) {
+            PhyChart(title: "Granted against sent, PRB", unit: "PRB",
+                     badges: RadioData.checkBadge(phy, "b16cUlGrantFields", passed: "matches 0xB139").map { [$0] } ?? [],
+                     empty: granted.isEmpty ? RadioData.emptyReason(phy, .lte_ul_grant_prb) : nil,
+                     yDomain: 0...max(50, (pts.map(\.y).max() ?? 50) + 2), session: session) {
+                ForEach(pts) { p in
+                    PointMark(x: .value("t", p.t), y: .value("PRB", p.y))
+                        .foregroundStyle(p.series == "Granted" ? RadioStyle.lines[2] : RadioStyle.lines[0].opacity(0.8))
+                        .symbol(p.series == "Granted" ? .square : .circle)
+                        .symbolSize(p.series == "Granted" ? 14 : 9)
+                }
+            }
+            LegendRow(items: [("granted (0xB16C DCI)", RadioStyle.lines[2]), ("sent (0xB139 PUSCH)", RadioStyle.lines[0])])
+            Text("The grant is logged four subframes before the transmission it schedules (FDD n+4), which is how the "
+                 + "two records were matched.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 
     private func points(_ title: String, _ unit: String, _ m: PhyMetric, _ window: ClosedRange<Double>,

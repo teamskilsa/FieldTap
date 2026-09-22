@@ -8,13 +8,15 @@ struct RadioPage: View {
     @Bindable var session: CaptureSession
 
     enum Section: String, CaseIterable, Identifiable {
-        case signal, dl, ul, csi, nr, antennas, carriers, rach, unavailable
+        case signal, neighbours, dl, mac, ul, csi, nr, antennas, carriers, rach, unavailable
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .signal: "Signal"
+            case .neighbours: "Neighbours"
             case .dl: "DL"
+            case .mac: "MAC DL"
             case .ul: "UL"
             case .csi: "CSI"
             case .nr: "NR"
@@ -29,21 +31,36 @@ struct RadioPage: View {
     private var section: Section { session.radioSection.flatMap(Section.init(rawValue:)) ?? .signal }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
-                SwiftUI.Section {
-                    content
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
-                } header: {
-                    chips
+        ScrollViewReader { page in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
+                    SwiftUI.Section {
+                        content
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 24)
+                    } header: {
+                        chips
+                    }
                 }
             }
+            // A screenshot can ask for one catalogue entry (-FTRadioEntry) instead of the top of a long list.
+            .onAppear { scroll(page) }
+            .onChange(of: session.radioEntry) { _, _ in scroll(page) }
         }
         // Room under the last chart for the floating cursor bar (CapturePageLayout).
         .contentMargins(.bottom, CapturePageLayout.scrollBottomInset, for: .scrollContent)
         .onAppear { if session.radioSection == nil { session.radioSection = Section.signal.rawValue } }
         .accessibilityIdentifier("radioPage")
+    }
+
+    /// Brings the asked-for catalogue entry into view, after the list has had a moment to build.
+    private func scroll(_ page: ScrollViewProxy) {
+        guard let entry = session.radioEntry else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            // Slightly above the top edge, so the pinned chip row does not cover the entry's own title.
+            withAnimation { page.scrollTo(entry, anchor: UnitPoint(x: 0, y: -0.06)) }
+        }
     }
 
     private var chips: some View {
@@ -79,7 +96,9 @@ struct RadioPage: View {
     @ViewBuilder private var content: some View {
         switch section {
         case .signal: SignalSection(session: session)
+        case .neighbours: NeighboursSection(session: session)
         case .dl: DownlinkSection(session: session)
+        case .mac: MacSection(session: session)
         case .ul: UplinkSection(session: session)
         case .csi: CsiSection(session: session)
         case .nr: NrSection(session: session)

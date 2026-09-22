@@ -151,7 +151,7 @@ Debug and Harness builds read launch arguments (`FTApp.LaunchPlan`) through `Deb
 | `-FTScreen captures\|guide\|settings\|importSheet\|overview\|callflow\|radio\|message` | route after launch |
 | `-FTFixture DIR` | load `Fixtures/local` as a capture (`FixtureLoader`): the qmdl through the Analyzer; an empty call flow falls back to `contract/callflow-golden.json`, an empty PHY summary to `contract/phy-summary.json`; the summary is built from the archive name, the profile stub, ambtool_output.log and info.txt |
 | `-FTOpenLatest` | open the newest capture |
-| `-FTCursorMs MS`, `-FTEvent N`, `-FTFilter ALL\|RRC\|NAS`, `-FTRadioSection NAME` | cursor, selected event (the message sheet for `message`), ladder filter, Radio section |
+| `-FTCursorMs MS`, `-FTEvent N`, `-FTFilter ALL\|RRC\|NAS`, `-FTRadioSection NAME`, `-FTRadioEntry ID` | cursor, selected event (the message sheet for `message`), ladder filter, Radio section, and the Not-available entry to scroll to |
 | `-FTImportState TOKEN` | an import sheet state without importing: `done`, a stage (`reading` ... `saving`), or a problem (`noBasebandTrace`, `profileExpired`, `loggingNotEnabled`, `profileInstalledNoTrace`, ...) |
 | `-FTGuideState TOKEN` | a Modem logging guide state (R1): `off`, `expired`, `expiringSoon`, `active`, `installedNoTrace`, `unknown` |
 
@@ -179,6 +179,10 @@ Release, present in Harness).
   (`openURL`): https://developer.apple.com/feedback-assistant/profiles-and-logs/?name=baseband
 - From info.txt and trace.info only file names and times are parsed; the GUID, DiagID and hardware model are
   never kept.
+- The modem's position records (0x1476 GNSS Position Report, 0x147C-0x147E, and the QMI links 0x1391 and
+  0x1544) are dropped by `CapturePrivacy` in `CaptureStore.save`, which is the one place a capture becomes a
+  file, so nothing the user copies, shares or exports can contain them. They are counted, never decoded, and
+  Settings and the Radio page's "Not available" list both say so.
 - GPL projects (SCAT, QCSuper, DiagNG, CellGuard, BaseTrace, Wireshark dissectors) and AGPL srsRAN are
   facts-only references; MobileInsight (Apache-2.0) layout facts are credited in Settings > Licences.
 

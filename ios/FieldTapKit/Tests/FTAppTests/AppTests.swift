@@ -28,18 +28,21 @@ struct NoImporter: CaptureImporting {
     @Test func everyArgument() throws {
         let plan = LaunchPlan.parse(arguments: [
             "-FTScreen", "radio", "-FTFixture", "/tmp/fx", "-FTOpenLatest", "-FTCursorMs", "14500", "-FTEvent", "82",
-            "-FTFilter", "nas", "-FTRadioSection", "nr", "-FTImportState", "deframing", "-FTGuideState", "expiringSoon",
+            "-FTFilter", "nas", "-FTRadioSection", "nr", "-FTRadioEntry", "nrUlSchedule",
+            "-FTImportState", "deframing", "-FTGuideState", "expiringSoon",
         ])
         #expect(plan.route == .radio)
         #expect(plan.fixtureDir?.path == "/tmp/fx")
         #expect(plan.openLatest && plan.cursorMs == 14_500 && plan.event == 82 && plan.filter == .NAS)
-        #expect(plan.radioSection == "nr" && plan.importState == "deframing" && plan.guideState == "expiringSoon")
+        #expect(plan.radioSection == "nr" && plan.radioEntry == "nrUlSchedule")
+        #expect(plan.importState == "deframing" && plan.guideState == "expiringSoon")
         #expect(plan.problems.isEmpty && plan.needsCapture && !plan.isEmpty)
     }
 
     @Test func aNormalLaunchIsEmptyAndBadValuesAreReported() {
         #expect(LaunchPlan.parse(arguments: []).isEmpty)
         #expect(LaunchPlan.parse(arguments: ["-NSDoubleLocalizedStrings", "YES"]).isEmpty)
+        #expect(!LaunchPlan.parse(arguments: ["-FTRadioEntry", "gnssPosition"]).isEmpty)
         let bad = LaunchPlan.parse(arguments: ["-FTScreen", "nowhere", "-FTCursorMs", "soon", "-FTOpenLatest", "YES"])
         #expect(bad.route == nil && bad.cursorMs == nil && bad.openLatest)
         #expect(bad.problems == ["-FTScreen nowhere", "-FTCursorMs soon"])

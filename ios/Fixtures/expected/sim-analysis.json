@@ -112,9 +112,11 @@
   "samples": {
    "$exact": {
     "lte_band": 3,
+    "lte_cfi": 24797,
     "lte_cqi_wideband_cw0": 2321,
     "lte_cqi_wideband_cw1": 1522,
     "lte_csf_tx_mode": 1770,
+    "lte_dl_assignments": 2260,
     "lte_dl_bandwidth_prb": 5,
     "lte_dl_bler": 35,
     "lte_dl_crc_ok": 3303,
@@ -123,7 +125,18 @@
     "lte_dl_modulation": 3303,
     "lte_dl_phy_throughput": 35,
     "lte_dl_prb": 3303,
+    "lte_dl_prb_allocation": 2360,
+    "lte_dl_rank": 2360,
     "lte_dl_tbs": 3303,
+    "lte_intra_neighbour_margin": 272,
+    "lte_intra_neighbour_rsrp": 272,
+    "lte_intra_neighbour_rsrq": 272,
+    "lte_intra_serving_rsrp": 373,
+    "lte_intra_serving_rsrq": 373,
+    "lte_mac_dl_bytes": 2521,
+    "lte_mac_dl_data_bytes": 2430,
+    "lte_mac_dl_padding": 2521,
+    "lte_mac_dl_signalling_bytes": 77,
     "lte_mac_ul_grant": 4537,
     "lte_neighbour_rsrp": 475,
     "lte_neighbour_rsrp_filtered": 475,
@@ -141,9 +154,18 @@
     "lte_rssi": 1945,
     "lte_rssi_per_rx": 2420,
     "lte_rx_antennas_measured": 2420,
+    "lte_rx_antennas_used": 2360,
     "lte_timing_advance_rar": 3,
+    "lte_tx_antenna_ports": 2360,
     "lte_tx_antennas_mib": 5,
+    "lte_tx_pa_state": 16514,
+    "lte_tx_power_chain": 16514,
+    "lte_tx_power_headroom": 16514,
+    "lte_tx_power_limit": 16514,
     "lte_ul_code_rate": 5365,
+    "lte_ul_grant_modulation": 4762,
+    "lte_ul_grant_prb": 4763,
+    "lte_ul_grant_start_rb": 4763,
     "lte_ul_mcs_derived": 5270,
     "lte_ul_modulation": 5365,
     "lte_ul_phy_throughput": 27,
@@ -164,8 +186,12 @@
   "versionMisses": {
    "$exact": {}
   },
-  "checks": 5,
-  "checksPassed": 5,
+  "checks": {
+   "$min": 17
+  },
+  "checksPassed": {
+   "$min": 17
+  },
   "checksFailed": [],
   "scellActivity": 3,
   "nrDlRecords": 497,
@@ -183,7 +209,8 @@
   "encrypted": {
    "records": 23764,
    "codes": 61
-  }
+  },
+  "_checks": "The reference extractor's own checks plus the added decoders' (0xB126, 0xB12A, 0xB16C, 0xB179, 0xB063, 0x184C, 0x1D0B): 17 on this capture with the built-in TBS table, 19 with the generated one. A minimum, because the table's state is a build-time thing; checksFailed stays empty."
  },
  "journey": {
   "durationMs": 26959.395,

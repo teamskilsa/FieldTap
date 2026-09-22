@@ -6,7 +6,9 @@ import FTPhy
 
 /// LTE downlink from 0xB173: MCS per transport block (colour = modulation, hollow = retransmission), the
 /// modulation mix per second, PRB and TBS per block, layers used against the rank reported, BLER and PHY
-/// throughput per second.
+/// throughput per second. Then two things the records themselves say rather than summarise: which resource blocks
+/// the scheduler actually gave this phone, per subframe (0xB126's allocation bitmap), and how many OFDM symbols
+/// the cell was spending on control (0xB12A's CFI), which is the cell's own load and not this phone's.
 struct DownlinkSection: View {
     @Bindable var session: CaptureSession
     /// nil = every carrier.
@@ -22,7 +24,7 @@ struct DownlinkSection: View {
             // the phone, and the code is still one tap away in Decoder health.
             SectionHeader(title: "Downlink, LTE", source: "Every block of data the network sent to this iPhone",
                           session: session,
-                          warning: RadioData.warning(phy, checks: ["b173TbsTable"])) { t in
+                          warning: RadioData.warning(phy, checks: ["b173TbsTable", "b126PrbBitmap", "b12aCfi"])) { t in
                 Self.readouts(phy, t)
             }
             if carriers.count > 1 {
@@ -33,6 +35,7 @@ struct DownlinkSection: View {
                 }
                 .pickerStyle(.segmented)
             }
+            PrbAllocationStrip(session: session)
             mcsChart(window)
             modulationMix(window)
             blockChart("PRB per transport block", "PRB", .lte_dl_prb, window, yDomain: 0...50)
@@ -42,13 +45,19 @@ struct DownlinkSection: View {
             binChart("BLER per second", "%", .lte_dl_bler, window, stacked: false)
             binChart("PHY throughput per second", "Mbit/s", .lte_dl_phy_throughput, window,
                      badges: [RadioBadge(text: "CRC-pass TBS")])
+            pdcchLoad(window)
         }
     }
 
     static func readouts(_ phy: PhyCapture, _ t: Double) -> [Readout] {
         let layers = RadioData.latest(phy, .lte_dl_layers, at: t)
+        // The 0xB126 and 0xB12A series carry the subframe in `tag`, which can be 0, so no serving-cell filter.
+        let prb = RadioData.latest(phy, .lte_dl_prb_allocation, at: t, maxAge: 1_000, servingOnly: false)
+        let cfi = RadioData.latest(phy, .lte_cfi, at: t, maxAge: 1_000, servingOnly: false)
         return [
             Readout(label: "MCS, 1 s median", value: RadioFormat.int(RadioData.median1s(phy, .lte_dl_mcs, at: t, carrier: 0))),
+            Readout(label: "PRB allocated", value: RadioFormat.int(prb?.value), stale: prb == nil),
+            Readout(label: "Control (CFI)", value: cfi?.value.map { "\(Int($0)) sym" } ?? "–", stale: cfi == nil),
             Readout(label: "Layers", value: RadioData.layersLabel(layers), stale: layers == nil),
             Readout(label: "BLER", value: RadioFormat.value(RadioData.bin(phy, .lte_dl_bler, at: t, carrier: 0), 1, "%")),
             Readout(label: "PHY, all CCs", value: RadioFormat.value(RadioData.bin(phy, .lte_dl_phy_throughput, at: t, carrier: nil), 2, "Mbit/s")),
@@ -280,4 +289,37 @@ extension DownlinkSection {
     }
 
     private func carrierIndex(_ name: String) -> Int { name == "PCell" ? 0 : Int(name.dropFirst(6)) ?? 0 }
+}
+
+extension DownlinkSection {
+    /// The cell's control-region size per subframe (0xB12A's CFI, 1-3 symbols on a 50-PRB cell). This is the first
+    /// load indicator in the app that does not depend on this phone's own traffic: a cell sitting at CFI 3 is
+    /// spending three of its symbols on control because it has many users to address.
+    fileprivate func pdcchLoad(_ window: ClosedRange<Double>) -> some View {
+        let cfi = RadioData.series(phy, .lte_cfi)
+        let pts = RadioData.points(cfi, window: window, series: "CFI", gapMs: 200)
+        var counts: [Int: Int] = [:]
+        for s in PhyQuery.slice(cfi, window) { if let v = s.value { counts[Int(v), default: 0] += 1 } }
+        let total = max(1, counts.values.reduce(0, +))
+        let split = [1, 2, 3].compactMap { k -> String? in
+            guard let n = counts[k] else { return nil }
+            return "CFI \(k): \(Int((Double(n) / Double(total) * 100).rounded()))%"
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            PhyChart(title: "PDCCH load (control symbols per subframe)", unit: "symbols",
+                     badges: RadioData.checkBadge(phy, "b12aCfi", passed: "only legal CFI values").map { [$0] } ?? [],
+                     empty: cfi.isEmpty ? RadioData.emptyReason(phy, .lte_cfi) : nil,
+                     yDomain: 0.5...3.5, height: 110, session: session) {
+                ForEach(pts) { p in
+                    PointMark(x: .value("t", p.t), y: .value("symbols", p.y))
+                        .foregroundStyle(RadioStyle.modulation[min(2, Int(p.y) - 1)])
+                        .symbolSize(8)
+                }
+            }
+            Text(split.isEmpty ? "The cell's own control-channel load, per subframe."
+                 : "Visible window: " + split.joined(separator: ", ")
+                     + ". The cell's own load, not this phone's traffic.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
 }
