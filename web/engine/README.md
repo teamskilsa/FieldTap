@@ -418,6 +418,30 @@ out), so either side can be swapped alone.
 - New named types for the existing inline unions: `Layer`, `Rat`, `Outcome`, `Move`, `ConnectionOutcome`,
   `LaneKind`, `TileGroup`, `PhySection`, `PhyConfidence` and `AvailabilityStatus`.
 
+**Added with the second decoder pass (0xB126, 0xB12A, 0xB16C, 0xB179, 0xB063, 0x184C, 0x1D0B).** All additive: the
+48 v1 metrics and every existing field are unchanged, and a UI that ignores the new names keeps working.
+
+- `PhyMetric` gains 16 names, in this order after the v1 48: `lte_pdsch_tx_antennas`, `lte_pdsch_rx_antennas`,
+  `lte_dl_rank`, `lte_dl_prb_allocation`, `lte_pdcch_cfi`, `lte_dl_assignments`, `lte_ul_grant_prb`,
+  `lte_ul_grant_start_rb`, `lte_neighbour_rsrp_intra`, `lte_neighbour_rsrq_intra`, `lte_neighbour_margin`,
+  `lte_fed_tx_power`, `lte_fed_tx_limit`, `lte_pa_gain_state`, `lte_mac_dl_bytes` and `lte_mac_dl_padding`.
+- `PhySample` gains `mask?: number[]`: a bitmap the record carries, low word first (0xB126's PRB allocation;
+  `value` is its popcount).
+- `PhySummary` gains six optional views, each absent when the capture has no such record: `measuredAntennas`
+  (`AntennaConfig[]`, the antenna answer measured per serving cell), `intraFreqNeighbours` (`NeighbourCell[]`, with
+  the handover margin), `macDl` (`MacDlAccounting`, with the coverage share it must be read with), `uplinkFrontEnd`
+  (`FrontEndUplink`, transmit-limited and which chain), `pdcchLoad` (`PdcchLoad`) and `uplinkGrants`
+  (`UplinkGrants`), plus `traceClock` (`TraceClock`, the measured holes in the trace).
+- `MacDlChannel.kind` includes `'other'` for an LCID that is not a 3GPP downlink channel; it is never counted as
+  user data.
+- `Availability.status` `'available'` is now used: an entry a new decoder has answered stays on the page with what
+  was validated and what was rejected (the UI groups those under a heading of its own).
+- The `traceGaps` problem's `message` is rewritten from the modem's own 1024 Hz clock ("3 trace files are missing
+  ...: 5.3 s of trace was never written, in 6 holes, the largest 2.2 s at 0:10.2") and its `detail` becomes
+  "`N` files, `M` ms". A capture with no missing files but measurable holes now raises the same problem kind.
+- `src/report/privacy.ts` is new and is not part of the analysis: it lists the location-bearing log codes (0x1476
+  and the rest of the GNSS block, 0x1391 and 0x1544) and strips them from anything the app writes out.
+
 ## What the real archives showed
 
 The shape the archive layer relies on, measured with `tools/scan.ts --full`. Both archives were read in place in

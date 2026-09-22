@@ -26,7 +26,7 @@ import { EMPTY_FLOW, type Flow } from './signalling/flow.ts';
 import { scrub } from './signalling/mask.ts';
 import { ladder } from './signalling/presentation.ts';
 import { type UiSignalling, uiSignalling } from './signalling/ui.ts';
-import { CONTRACT_VERSION, type CaptureAnalysis, type ImportProblem, type ImportProgress, type ImportStage } from './types.ts';
+import { CONTRACT_VERSION, type CaptureAnalysis, type ImportProblem, type ImportProgress, type ImportStage, type TraceClock } from './types.ts';
 
 export interface AnalyzeOptions {
   fileName: string;
@@ -158,6 +158,7 @@ export async function analyzeCapture(
     buildJourney(flow, phy.summary, captureFacts, phy.series));
   const annotations = guard(problems, 'radio', new Map<number, string>(), () => stepAnnotations(flow, journey));
   const series = guard(problems, 'radio', phy.series, () => attributeCarriers(phy.series, journey));
+  measureTraceGaps(problems, phy.summary.traceClock);
   // Masked: no identifier, PDU byte or cell identity leaves the worker unless the user asks (reveal below).
   const ui = guard<UiSignalling>(problems, 'decoding', uiSignalling(EMPTY_FLOW), () => uiSignalling(flow, { annotations }));
   progress('radio', 1, `${phy.series.length} radio series`);
@@ -186,6 +187,39 @@ export async function analyzeCapture(
   // The PDUs are views into the deframer's record blocks: copy them so the blocks (the whole trace) can go.
   for (const e of flow.events) e.pdu = e.pdu.slice();
   return { analysis: finished(analysis, progress), reveal: flow.events.length ? revealer(flow, annotations) : null };
+}
+
+/**
+ * The trace-gap warning, in seconds instead of file counts.
+ *
+ * The archive stage can only count the chunk files the collector left out. The modem's own 1024 Hz sleep clock
+ * (0x1D0B, a 100 Hz record) says how much wall time actually went missing and where, so the warning reads "5.3 s of
+ * trace was never written, the largest 2.2 s at 0:10.2" instead of "3 files are missing". When the files are all
+ * there but the clock still shows holes, the warning stands on the clock's evidence alone.
+ */
+export function measureTraceGaps(problems: ImportProblem[], clock: TraceClock | undefined): void {
+  if (!clock || clock.missingMs < 1000) return;
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  const at = (tMs: number) => {
+    const total = Math.max(0, tMs) / 1000;
+    return `${Math.floor(total / 60)}:${(total % 60).toFixed(1).padStart(4, '0')}`;
+  };
+  const largest = [...clock.gaps].sort((a, b) => b.missingMs - a.missingMs)[0];
+  const holes = `${clock.gaps.length} ${clock.gaps.length === 1 ? 'hole' : 'holes'}`;
+  const measured = `the modem's own 1024 Hz clock says ${seconds(clock.missingMs)} of trace was never written, in ${holes}` +
+    (largest ? `, the largest ${seconds(largest.missingMs)} at ${at(largest.tMs)}` : '');
+  const existing = problems.find((p) => p.kind === 'traceGaps');
+  if (existing) {
+    const n = existing.detail ?? '';
+    const files = n ? `${n} trace ${n === '1' ? 'file is' : 'files are'} missing inside the kept window` : 'Trace files are missing';
+    existing.message = `${files}: ${measured}. Messages around the holes may be incomplete.`;
+    existing.detail = `${n || '?'} files, ${Math.round(clock.missingMs)} ms`;
+    return;
+  }
+  problems.push({
+    ...problem('traceGaps', `Part of the trace was not written: ${measured}. Messages around the holes may be incomplete.`, false),
+    detail: `0 files, ${Math.round(clock.missingMs)} ms`,
+  });
 }
 
 /** Built outside analyzeCapture on purpose: a closure there would share its scope and keep the records alive. */

@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ban, CircleCheck, Clock, Lock, SearchX, XCircle } from "lucide-react";
 import {
-  BarMark, Chart, CrosshairProvider, decimate, LineMark, ScatterMark, StackedMark, StepMark, type Scale,
+  AllocationMark, BarMark, Chart, CrosshairProvider, decimate, LineMark, ScatterMark, StackedMark, StepMark, type Scale,
 } from "@/components/capture/charts";
 import { fmtMetric, fmtSince, fmtValue, rsrpQuality } from "@/lib/analysis/format";
 import { SEQUENTIAL, useBandPalette, type BandPalette } from "@/lib/analysis/palette";
@@ -17,10 +17,10 @@ import type {
 import { cn } from "@/lib/utils";
 
 export type RadioSection =
-  | "Signal" | "Downlink" | "Uplink" | "CSI" | "NR" | "Carriers" | "Antennas" | "RACH" | "Not available";
+  | "Signal" | "Neighbours" | "Downlink" | "Uplink" | "CSI" | "NR" | "Carriers" | "Antennas" | "RACH" | "Not available";
 
 const SECTIONS: RadioSection[] = [
-  "Signal", "Downlink", "Uplink", "CSI", "NR", "Carriers", "Antennas", "RACH", "Not available",
+  "Signal", "Neighbours", "Downlink", "Uplink", "CSI", "NR", "Carriers", "Antennas", "RACH", "Not available",
 ];
 
 /** Modulation order is ordinal, so it takes the sequential ramp, never band colours (audit A23). */
@@ -42,6 +42,16 @@ const SHOWN_ELSEWHERE = new Set<PhyMetric>([
   "lte_dl_bandwidth_prb",
   "lte_tx_antennas_mib",
   "lte_rx_antennas_measured",
+  // Measured per serving cell rather than plotted: the Antennas section shows them with their source.
+  "lte_pdsch_tx_antennas",
+  "lte_pdsch_rx_antennas",
+  // The neighbour list has its own section, and its RSRP is drawn on the serving-cell chart in Signal.
+  "lte_neighbour_rsrp_intra",
+  "lte_neighbour_rsrq_intra",
+  "lte_neighbour_margin",
+  // Drawn inside another chart: the allocation as a strip, the chain limit as a line on the power chart.
+  "lte_dl_prb_allocation",
+  "lte_fed_tx_limit",
 ]);
 
 interface SectionProps {
@@ -104,6 +114,7 @@ export function RadioTab({
       <section className="min-w-0 space-y-2" aria-label={`${section} charts`}>
         <CrosshairProvider>
           {section === "Signal" && <SignalSection {...props} />}
+          {section === "Neighbours" && <NeighbourSection {...props} onCursor={onCursor} />}
           {section === "Downlink" && <DownlinkSection {...props} />}
           {section === "Uplink" && <UplinkSection {...props} />}
           {section === "CSI" && <CsiSection {...props} />}
@@ -127,6 +138,8 @@ function SignalSection({ analysis, palette, view, cursorMs, onCursor, onView }: 
   const rest = all.filter((s) => !s.perIndexSeries);
   const rxAt = sampleAt(perRx, cursorMs);
   const rxCount = Math.max(1, ...(perRx?.samples ?? []).map((s) => s.perIndex?.length ?? 0));
+  const serving = seriesOf(analysis, "lte_rsrp_filtered");
+  const neighbours = seriesOf(analysis, "lte_neighbour_rsrp_intra");
 
   return (
     <>
@@ -162,10 +175,145 @@ function SignalSection({ analysis, palette, view, cursorMs, onCursor, onView }: 
           )}
         </Chart>
       )}
+      {neighbours && serving && (
+        <Chart
+          {...frame}
+          title="Serving cell and its intra-frequency neighbours"
+          unit="dBm"
+          series={neighbours}
+          valueAtCursor={valueText(sampleAt(serving, cursorMs), "dBm")}
+          values={[...serving.samples, ...neighbours.samples].map((s) => s.value ?? 0)}
+          note={
+            <p className="pb-1 text-[11px] text-[var(--text-3)]">
+              The line is the serving cell (0xB193); each dot is a neighbour this record measured, by PCI. Most of
+              them are measured by nothing else in the capture.
+            </p>
+          }
+        >
+          {(scale) => (
+            <g>
+              <ScatterMark
+                scale={scale}
+                points={thin(windowed(neighbours, view), 2500).map((s) => ({
+                  t: s.tMs,
+                  v: s.value,
+                  fill: pciColor(s.pci ?? 0),
+                }))}
+              />
+              <LineMark
+                scale={scale}
+                stroke="var(--text)"
+                points={decimate(windowed(serving, view)).map((s) => ({ t: s.tMs, v: s.value }))}
+              />
+            </g>
+          )}
+        </Chart>
+      )}
       {rest.map((series, i) => (
         <Simple key={series.metric} {...frame} series={series} showAxis={i === rest.length - 1} />
       ))}
     </>
+  );
+}
+
+/**
+ * The neighbour list and the handover margin (0xB179): the answer to "why didn't it hand over". The margin is the
+ * neighbour's RSRP less the serving cell's in the same record, so above 0 dB the neighbour was the stronger cell -
+ * and if the phone stayed anyway, the network's offsets and time-to-trigger are the reason.
+ */
+function NeighbourSection({ analysis, palette, view, cursorMs, onCursor, onView }: SectionProps) {
+  const frame = { analysis, palette, view, cursorMs, onCursor, onView };
+  const margin = seriesOf(analysis, "lte_neighbour_margin");
+  const cells = analysis.phySummary.intraFreqNeighbours ?? [];
+  if (!cells.length || !margin) {
+    return <Empty>No intra-frequency neighbour measurements in this capture (0xB179).</Empty>;
+  }
+  const stronger = cells.filter((c) => c.marginBestDb > 0);
+  return (
+    <div className="space-y-2">
+      <Chart
+        {...frame}
+        title="Handover margin: each neighbour against the serving cell"
+        unit="dB"
+        series={margin}
+        showAxis
+        valueAtCursor={valueText(sampleAt(margin, cursorMs), "dB")}
+        rules={[{ value: 0, label: "as strong as the serving cell" }]}
+        note={
+          <p className="pb-1 text-[11px] text-[var(--text-3)]">
+            Measured inside one record, so no clock skew: above the line the neighbour was stronger than the cell
+            the phone was on.
+          </p>
+        }
+      >
+        {(scale) => (
+          <ScatterMark
+            scale={scale}
+            points={thin(windowed(margin, view), 2500).map((s) => ({ t: s.tMs, v: s.value, fill: pciColor(s.pci ?? 0) }))}
+          />
+        )}
+      </Chart>
+      <section className="panel overflow-x-auto">
+        <h3 className="border-b border-[var(--line)] px-3 py-2 text-[13px] font-medium">
+          Neighbours measured <span className="num text-[var(--text-3)]">{cells.length}</span>
+          <span className="chip num ml-2">0xB179 v56</span>
+          {stronger.length > 0 && (
+            <span className="ml-2 text-[11px] font-normal text-[var(--text-3)]">
+              {stronger.length} reached or passed the serving cell
+            </span>
+          )}
+        </h3>
+        <table className="w-full min-w-[620px] text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--line)] text-[11px] uppercase tracking-[0.02em] text-[var(--text-3)]">
+              <th className="px-3 py-1.5 text-left font-medium">EARFCN</th>
+              <th className="py-1.5 text-left font-medium">PCI</th>
+              <th className="py-1.5 text-left font-medium">Best RSRP</th>
+              <th className="py-1.5 text-left font-medium">Median RSRP</th>
+              <th className="py-1.5 text-left font-medium">Median RSRQ</th>
+              <th className="py-1.5 text-left font-medium">Best margin</th>
+              <th className="py-1.5 text-left font-medium">Median margin</th>
+              <th className="py-1.5 text-left font-medium">Measurements</th>
+              <th className="py-1.5 text-left font-medium">First seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cells.map((c) => (
+              <tr key={`${c.earfcn}-${c.pci}`} className="border-b border-[var(--line)] last:border-b-0 hover:bg-[var(--surface-2)]">
+                <td className="num px-3 py-1.5">{c.earfcn}</td>
+                <td className="num py-1.5">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2 rounded-full" style={{ background: pciColor(c.pci) }} />
+                    {c.pci}
+                  </span>
+                </td>
+                <td className="num py-1.5">{fmtMetric(c.rsrpBestDbm, "dBm")}</td>
+                <td className="num py-1.5 text-[var(--text-3)]">{fmtMetric(c.rsrpMedianDbm, "dBm")}</td>
+                <td className="num py-1.5 text-[var(--text-3)]">{fmtMetric(c.rsrqMedianDb, "dB")}</td>
+                <td className={cn("num py-1.5", c.marginBestDb > 0 && "text-[var(--warning)]")}>
+                  {signedDb(c.marginBestDb)}
+                </td>
+                <td className="num py-1.5 text-[var(--text-3)]">{signedDb(c.marginMedianDb)}</td>
+                <td className="num py-1.5">
+                  {c.measurements}
+                  {c.onlySource && <span className="chip ml-1.5">only source</span>}
+                </td>
+                <td className="num py-1.5">
+                  <button className="underline-offset-2 hover:underline" onClick={() => onCursor(c.firstMs)}>
+                    {fmtSince(c.firstMs)}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="px-3 py-2 text-[11px] text-[var(--text-3)]">
+          "Only source" means no other record in this capture measured that cell. The margin is the neighbour's RSRP
+          less the serving cell's in the same record; a positive margin with no handover is the network's own
+          offsets and time-to-trigger at work.
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -178,6 +326,12 @@ function DownlinkSection({ analysis, palette, view, cursorMs, onCursor, onView }
   const carriers = useMemo(() => carrierKeys(tput, palette), [palette, tput]);
   const rest = sectionSeries(analysis, "downlink").filter(
     (s) => !["lte_dl_mcs", "lte_dl_bler", "lte_dl_phy_throughput"].includes(s.metric),
+  );
+  const allocation = seriesOf(analysis, "lte_dl_prb_allocation");
+  const bandwidthPrb = Math.max(
+    6,
+    ...(seriesOf(analysis, "lte_dl_bandwidth_prb")?.samples.map((s) => s.value ?? 0) ?? []),
+    ...(allocation?.samples.map((s) => (s.mask?.length ?? 0) * 32) ?? []),
   );
 
   return (
@@ -222,6 +376,31 @@ function DownlinkSection({ analysis, palette, view, cursorMs, onCursor, onView }
               buckets={mix}
               keys={[...MODS]}
               colorOf={(k) => MOD_COLOR[k] ?? "var(--text-3)"}
+            />
+          )}
+        </Chart>
+      )}
+      {allocation && (
+        <Chart
+          {...frame}
+          title="Which resource blocks the scheduler gave this phone"
+          unit="PRB index"
+          series={allocation}
+          domain={[0, bandwidthPrb]}
+          valueAtCursor={valueText(sampleAt(allocation, cursorMs), "PRB")}
+          note={
+            <p className="pb-1 text-[11px] text-[var(--text-3)]">
+              One column per logged subframe, filled at the allocated resource blocks - not just how many, which
+              ones. Decoded from the PDSCH demapper configuration, 20 subframes per record.
+            </p>
+          }
+        >
+          {(scale) => (
+            <AllocationMark
+              scale={scale}
+              view={view}
+              fill="var(--seq-300)"
+              columns={thin(windowed(allocation, view), 3000).map((s) => ({ t: s.tMs, mask: s.mask ?? [] }))}
             />
           )}
         </Chart>
@@ -274,7 +453,96 @@ function DownlinkSection({ analysis, palette, view, cursorMs, onCursor, onView }
           )}
         </Chart>
       )}
+      <MacAccountingPanel analysis={analysis} />
     </>
+  );
+}
+
+/**
+ * MAC-level downlink accounting (0xB063): useful bytes against wasted ones, and signalling against user data. It is
+ * never the total - the walk over the PDCP tails reaches about 80% of the transport blocks the records declare -
+ * so the coverage is stated on the panel and 0xB173 stays the throughput source.
+ */
+function MacAccountingPanel({ analysis }: { analysis: CaptureAnalysis }) {
+  const mac = analysis.phySummary.macDl;
+  if (!mac) return null;
+  const byKind = (kinds: string[]) => mac.channels.filter((c) => kinds.includes(c.kind)).reduce((n, c) => n + c.bytes, 0);
+  const data = byKind(["data"]), signalling = byKind(["signalling", "broadcast"]), control = byKind(["control", "other"]);
+  const total = Math.max(1, data + signalling + control);
+  const bars: { label: string; bytes: number; color: string }[] = [
+    { label: "User data", bytes: data, color: "var(--seq-400)" },
+    { label: "Signalling", bytes: signalling, color: "var(--seq-200)" },
+    { label: "Control and unattributed", bytes: control, color: "var(--line-strong)" },
+  ];
+  return (
+    <section className="panel p-4">
+      <h3 className="flex flex-wrap items-center gap-2 text-[13px] font-medium">
+        What reached the MAC
+        <span className="chip num">0xB063 v50</span>
+        <span className="chip" title="The walk over the PDCP tails reaches about 80% of the declared transport blocks.">
+          partial coverage
+        </span>
+      </h3>
+      <p className="mt-1 text-xs text-[var(--text-3)]">
+        {`${mac.walkedBlocks.toLocaleString("en-US")} of ${mac.declaredBlocks.toLocaleString("en-US")} declared transport blocks were walked (${
+          (mac.coverageShare * 100).toFixed(0)
+        }% coverage), so every byte below is a floor, not a total. Throughput comes from 0xB173, above.`}
+      </p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div>
+          <p className="num text-[20px] font-medium leading-7">
+            {fmtBytes(mac.bytes)}
+            <span className="ml-2 text-[13px] font-normal text-[var(--text-3)]">reached the MAC</span>
+          </p>
+          <p className="num mt-1 text-[13px] text-[var(--text-3)]">
+            {`${fmtBytes(mac.paddingBytes)} of it was padding (${(mac.paddingShare * 100).toFixed(1)}% wasted grant)`}
+          </p>
+          <p className="num mt-1 text-[13px] text-[var(--text-3)]">
+            {mac.timingAdvanceCommands === 0
+              ? "No timing-advance commands"
+              : `${mac.timingAdvanceCommands} timing-advance commands (the record carries no value for them)`}
+          </p>
+        </div>
+        <div>
+          <div className="flex h-3 overflow-hidden rounded-[3px]">
+            {bars.map((b) => (
+              <div key={b.label} style={{ width: `${(b.bytes / total) * 100}%`, background: b.color }} title={`${b.label}: ${fmtBytes(b.bytes)}`} />
+            ))}
+          </div>
+          <div className="mt-2 space-y-1">
+            {bars.map((b) => (
+              <div key={b.label} className="flex items-center gap-2 text-[11px] text-[var(--text-3)]">
+                <span className="size-2 rounded-[2px]" style={{ background: b.color }} />
+                {b.label}
+                <span className="num ml-auto">{fmtBytes(b.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="-mx-4 mt-3 overflow-x-auto px-4">
+      <table className="w-full min-w-[420px] text-[13px]">
+        <thead>
+          <tr className="border-b border-[var(--line)] text-[11px] uppercase tracking-[0.02em] text-[var(--text-3)]">
+            <th className="py-1.5 text-left font-medium">Channel</th>
+            <th className="py-1.5 text-left font-medium">LCID</th>
+            <th className="py-1.5 text-left font-medium">Bytes</th>
+            <th className="py-1.5 text-left font-medium">SDUs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {mac.channels.map((c) => (
+            <tr key={c.lcid} className="border-b border-[var(--line)] last:border-b-0">
+              <td className="py-1.5">{c.name}</td>
+              <td className="num py-1.5 text-[var(--text-3)]">{c.lcid}</td>
+              <td className="num py-1.5">{fmtBytes(c.bytes)}</td>
+              <td className="num py-1.5 text-[var(--text-3)]">{c.sdus.toLocaleString("en-US")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      </div>
+    </section>
   );
 }
 
@@ -282,11 +550,14 @@ function UplinkSection({ analysis, palette, view, cursorMs, onCursor, onView }: 
   const frame = { analysis, palette, view, cursorMs, onCursor, onView };
   const power = seriesOf(analysis, "lte_pusch_tx_power_required");
   const tput = seriesOf(analysis, "lte_ul_phy_throughput");
+  const fedPower = seriesOf(analysis, "lte_fed_tx_power");
+  const fedLimit = seriesOf(analysis, "lte_fed_tx_limit");
   const rest = sectionSeries(analysis, "uplink").filter(
-    (s) => s.metric !== "lte_pusch_tx_power_required" && s.metric !== "lte_ul_phy_throughput",
+    (s) => !["lte_pusch_tx_power_required", "lte_ul_phy_throughput", "lte_fed_tx_power", "lte_pa_gain_state"].includes(s.metric),
   );
   return (
     <>
+      <TransmitLimitedPanel analysis={analysis} />
       {power && (
         <Chart
           {...frame}
@@ -311,6 +582,48 @@ function UplinkSection({ analysis, palette, view, cursorMs, onCursor, onView }: 
           )}
         </Chart>
       )}
+      {fedPower && (
+        <Chart
+          {...frame}
+          title="Front-end transmit power, per chain, against the chain's own limit"
+          unit="dBm"
+          series={fedPower}
+          valueAtCursor={valueText(sampleAt(fedPower, cursorMs), "dBm")}
+          values={[...fedPower.samples, ...(fedLimit?.samples ?? [])].map((s) => s.value ?? 0)}
+          note={
+            <div className="flex flex-wrap gap-2 pb-1 text-[11px] text-[var(--text-3)]">
+              {chainLegend(analysis).map((c) => (
+                <span key={c.chain} className="flex items-center gap-1">
+                  <span className="size-2 rounded-full" style={{ background: c.color }} /> {c.chain}
+                </span>
+              ))}
+              <span className="flex items-center gap-1">
+                <span className="h-0.5 w-3 bg-[var(--warning)]" /> the chain's logged limit
+              </span>
+            </div>
+          }
+        >
+          {(scale) => (
+            <g>
+              {fedLimit && (
+                <LineMark
+                  scale={scale}
+                  stroke="var(--warning)"
+                  points={thin(windowed(fedLimit, view), 2000).map((s) => ({ t: s.tMs, v: s.value }))}
+                />
+              )}
+              <ScatterMark
+                scale={scale}
+                points={thin(windowed(fedPower, view), 3000).map((s) => ({
+                  t: s.tMs,
+                  v: s.value,
+                  fill: chainColor(s.tag ?? ""),
+                }))}
+              />
+            </g>
+          )}
+        </Chart>
+      )}
       {rest.map((series) => (
         <Simple key={series.metric} {...frame} series={series} />
       ))}
@@ -329,6 +642,83 @@ function UplinkSection({ analysis, palette, view, cursorMs, onCursor, onView }: 
         </Chart>
       )}
     </>
+  );
+}
+
+/**
+ * Is the phone transmit-limited, and on which chain (0x184C)? An uplink-limited phone at the cell edge is the most
+ * common cause of "full bars, nothing works", and nothing else FieldTap decodes says it. The power and the limit are
+ * the front end's own, logged at its own instants, so the wording is "at or above its logged limit" rather than
+ * "capped", and the numbers carry medium confidence.
+ */
+function TransmitLimitedPanel({ analysis }: { analysis: CaptureAnalysis }) {
+  const front = analysis.phySummary.uplinkFrontEnd;
+  if (!front || front.liveSamples === 0) return null;
+  const share = front.atLimitShare;
+  const limited = share >= 0.25;
+  const live = front.chains.filter((c) => c.liveSamples > 0).sort((a, b) => b.liveSamples - a.liveSamples);
+  return (
+    <section className="panel p-4">
+      <h3 className="flex flex-wrap items-center gap-2 text-[13px] font-medium">
+        Transmit power at the front end
+        <span className="chip num">0x184C v17</span>
+        <span className="chip" title="The front end's own power, a different quantity from the PUSCH power the network asked for.">front-end</span>
+        <span className="chip border-[var(--warning)]/45" title="Decoded with a record layout that still has some uncertainty.">medium</span>
+      </h3>
+      <p className="num mt-1 text-[20px] font-medium leading-7">
+        <span className={limited ? "text-[var(--warning)]" : undefined}>
+          {limited ? "Transmit-limited" : "Not transmit-limited"}
+        </span>
+        <span className="ml-2 text-[13px] font-normal text-[var(--text-3)]">
+          {`${(share * 100).toFixed(0)}% of ${front.liveSamples.toLocaleString("en-US")} transmitting samples sat at or above the chain's own limit`}
+        </span>
+      </p>
+      <p className="mt-1 text-[13px] text-[var(--text-3)]">
+        {front.liveChain
+          ? `Transmitting on chain ${front.liveChain}${live.length > 1 ? `, with ${live.length - 1} more chain${live.length > 2 ? "s" : ""} active` : ""}.`
+          : "No chain was transmitting."}
+      </p>
+      <div className="-mx-4 mt-3 overflow-x-auto px-4">
+      <table className="w-full min-w-[640px] text-[13px]">
+        <thead>
+          <tr className="border-b border-[var(--line)] text-[11px] uppercase tracking-[0.02em] text-[var(--text-3)]">
+            <th className="py-1.5 text-left font-medium">Chain</th>
+            <th className="py-1.5 text-left font-medium">Transmitting</th>
+            <th className="py-1.5 text-left font-medium">Median</th>
+            <th className="py-1.5 text-left font-medium">Peak</th>
+            <th className="py-1.5 text-left font-medium">Limit</th>
+            <th className="py-1.5 text-left font-medium">At the limit</th>
+            <th className="py-1.5 text-left font-medium">PA gain states</th>
+          </tr>
+        </thead>
+        <tbody>
+          {front.chains.map((c) => (
+            <tr key={c.chain} className={cn("border-b border-[var(--line)] last:border-b-0", c.liveSamples === 0 && "text-[var(--text-3)]")}>
+              <td className="num py-1.5">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-2 rounded-full" style={{ background: chainColor(`chain ${c.chain}`) }} />
+                  {c.chain}
+                  {c.chain === front.liveChain && <span className="chip ml-1">transmitting</span>}
+                </span>
+              </td>
+              <td className="num py-1.5">{c.liveSamples === 0 ? "off" : `${c.liveSamples.toLocaleString("en-US")} of ${c.samples.toLocaleString("en-US")}`}</td>
+              <td className="num py-1.5">{c.liveSamples === 0 ? "—" : fmtMetric(c.medianPowerDbm, "dBm")}</td>
+              <td className="num py-1.5">{c.liveSamples === 0 ? "—" : fmtMetric(c.maxPowerDbm, "dBm")}</td>
+              <td className="num py-1.5">{c.limitDbm == null ? "—" : fmtMetric(c.limitDbm, "dBm")}</td>
+              <td className="num py-1.5">
+                {c.liveSamples === 0 ? "—" : `${((c.atLimitSamples / c.liveSamples) * 100).toFixed(0)}%`}
+              </td>
+              <td className="num py-1.5 text-[var(--text-3)]">{c.gainStates.length ? c.gainStates.join(", ") : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      </div>
+      <p className="mt-2 text-[11px] text-[var(--text-3)]">
+        {front.source}. The PUSCH power the network asked for is the chart below this one; a best fit between the two
+        leaves about 3.8 dB, which is why they are shown side by side rather than as one number.
+      </p>
+    </section>
   );
 }
 
@@ -526,18 +916,86 @@ function AntennaPanel({ analysis, cursorMs }: { analysis: CaptureAnalysis; curso
   const perRx = sampleAt(seriesOf(analysis, "lte_rsrp_per_rx"), cursorMs);
   const tx = analysis.phySummary.txAntennasMib;
   const rxEntries = Object.entries(analysis.phySummary.rxAntennasByEarfcn);
+  const measured = analysis.phySummary.measuredAntennas ?? [];
+  const bandOf = (earfcn: number, pci: number) =>
+    analysis.journey.cells.find((c) => c.cell.earfcn === earfcn && c.cell.pci === pci)?.band;
 
   return (
     <div className="space-y-3">
-      <section className="panel p-4">
-        <h3 className="text-[13px] font-medium">What the cell transmits with</h3>
-        <p className="num mt-1 text-[20px] font-medium leading-7">
-          {tx.length ? tx.map((n) => `${n}`).join(" / ") : "—"}
-          <span className="ml-2 text-[13px] font-normal text-[var(--text-3)]">
-            {tx.length ? "transmit antennas, from the MIB" : "not seen in this capture"}
-          </span>
-        </p>
-      </section>
+      {measured.length > 0 ? (
+        <section className="panel p-4">
+          <h3 className="flex flex-wrap items-center gap-2 text-[13px] font-medium">
+            Antennas, measured per serving cell
+            <span className="chip num">0xB126 v163</span>
+          </h3>
+          <p className="mt-1 text-xs text-[var(--text-3)]">
+            Read from the PDSCH demapper configuration, twenty subframes per record - not inferred from the MIB
+            broadcast. The MIB's own antenna count is shown beside it as the cross-check.
+          </p>
+          <div className="-mx-4 mt-3 overflow-x-auto px-4">
+          <table className="w-full min-w-[620px] text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--line)] text-[11px] uppercase tracking-[0.02em] text-[var(--text-3)]">
+                <th className="py-1.5 text-left font-medium">Cell</th>
+                <th className="py-1.5 text-left font-medium">Tx antenna ports</th>
+                <th className="py-1.5 text-left font-medium">Rx antennas in use</th>
+                <th className="py-1.5 text-left font-medium">MIMO rank</th>
+                <th className="py-1.5 text-left font-medium">Broadcast (MIB)</th>
+                <th className="py-1.5 text-left font-medium">Subframes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {measured.map((m) => {
+                const band = bandOf(m.earfcn, m.pci);
+                const all = Object.entries(m.rankHistogram).sort((a, b) => Number(b[1]) - Number(a[1]));
+                const total = all.reduce((n, [, v]) => n + Number(v), 0) || 1;
+                // A rank seen in a handful of subframes rounds to 0%: it is noise in a summary line.
+                const ranks = all.filter(([, v]) => Number(v) / total >= 0.005).slice(0, 3);
+                return (
+                  <tr key={`${m.earfcn}-${m.pci}`} className="border-b border-[var(--line)] last:border-b-0">
+                    <td className="num py-1.5">{band ? `${band} · PCI ${m.pci}` : `EARFCN ${m.earfcn} · PCI ${m.pci}`}</td>
+                    <td className="num py-1.5 text-[15px]">{m.txPorts}</td>
+                    <td className="num py-1.5 text-[15px]">
+                      {m.rxAntennas}
+                      <span className="chip ml-1.5" title="88-93% agreement with the receive antennas 0xB193 measured.">medium</span>
+                    </td>
+                    <td className="num py-1.5 text-[var(--text-3)]">
+                      {ranks.map(([rank, n]) => `${rank}: ${((Number(n) / total) * 100).toFixed(0)}%`).join(", ")}
+                    </td>
+                    <td className="num py-1.5">
+                      {m.mibTxAntennas == null
+                        ? <span className="text-[var(--text-3)]">no MIB captured</span>
+                        : m.mibTxAntennas === m.txPorts
+                        ? <span className="text-[var(--good)]">{m.mibTxAntennas} ✓</span>
+                        : <span className="text-[var(--warning)]">{m.mibTxAntennas}</span>}
+                    </td>
+                    <td className="num py-1.5 text-[var(--text-3)]">{m.subframes.toLocaleString("en-US")}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          </div>
+          <p className="mt-2 text-[11px] text-[var(--text-3)]">
+            The transmit-antenna field follows the serving cell rather than the scheduling, which is what makes it an
+            antenna-port count and not the transmission mode. Where a cell's MIB was captured the two agree.
+          </p>
+        </section>
+      ) : (
+        <section className="panel p-4">
+          <h3 className="text-[13px] font-medium">What the cell transmits with</h3>
+          <p className="num mt-1 text-[20px] font-medium leading-7">
+            {tx.length ? tx.map((n) => `${n}`).join(" / ") : "—"}
+            <span className="ml-2 text-[13px] font-normal text-[var(--text-3)]">
+              {tx.length ? "transmit antennas, from the MIB broadcast" : "not seen in this capture"}
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-[var(--text-3)]">
+            No PDSCH demapper records (0xB126) in this capture, so this is the broadcast's own figure rather than a
+            measurement.
+          </p>
+        </section>
+      )}
       <section className="panel p-4">
         <h3 className="text-[13px] font-medium">What the phone measured with</h3>
         <dl className="mt-2 space-y-1">
@@ -622,6 +1080,8 @@ function RachPanel({ analysis, onCursor }: { analysis: CaptureAnalysis; onCursor
 }
 
 const AVAILABILITY_GROUPS: { status: AvailabilityStatus; heading: string; icon: typeof Lock }[] = [
+  // Entries a new decoder has since answered stay on this page, with what was validated and what was rejected.
+  { status: "available", heading: "Answered, with what was and was not validated", icon: CircleCheck },
   { status: "encryptedByModem", heading: "Encrypted by the modem", icon: Lock },
   { status: "notFoundInPlainLogs", heading: "Not in the plain records", icon: SearchX },
   { status: "notDecodedYet", heading: "Not decoded yet", icon: Clock },
@@ -755,6 +1215,31 @@ function rxAntennas(analysis: CaptureAnalysis, c: JourneyCell): string {
   return best ? best[0] : "—";
 }
 
+/** A stable colour per PCI / per transmit chain, off the sequential ramp: these are identities, not magnitudes. */
+function rampColor(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  return SEQUENTIAL[Math.abs(hash) % SEQUENTIAL.length] as string;
+}
+
+const pciColor = (pci: number): string => rampColor(`pci-${pci}`);
+const chainColor = (tag: string): string => rampColor(`chain-${tag.replace(/ at limit$/, "")}`);
+
+function chainLegend(analysis: CaptureAnalysis): { chain: string; color: string }[] {
+  return (analysis.phySummary.uplinkFrontEnd?.chains ?? [])
+    .filter((c) => c.liveSamples > 0)
+    .map((c) => ({ chain: c.chain, color: chainColor(`chain ${c.chain}`) }));
+}
+
+const signedDb = (v: number): string => `${v > 0 ? "+" : ""}${v.toFixed(1)} dB`;
+
+/** Bytes as a report reads them: 655,956 bytes is "656 kB", 2,235,835 is "2.24 MB". */
+function fmtBytes(bytes: number): string {
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(2)} MB`;
+  if (bytes >= 1e3) return `${Math.round(bytes / 1e3).toLocaleString("en-US")} kB`;
+  return `${bytes.toLocaleString("en-US")} B`;
+}
+
 function modulationMix(series: PhySeries | undefined, view: [number, number]): { t: number; parts: Record<string, number> }[] {
   if (!series) return [];
   const buckets = new Map<number, Record<string, number>>();
@@ -813,6 +1298,7 @@ function countOf(analysis: CaptureAnalysis, section: RadioSection, cursorMs: num
     case "Antennas": return Object.keys(analysis.phySummary.rxAntennasByEarfcn).length;
     case "RACH": return analysis.phySummary.rach.length;
     case "Not available": return analysis.availability.filter((a) => a.status !== "available").length;
+    case "Neighbours": return (analysis.phySummary.intraFreqNeighbours ?? []).length;
     case "Signal": return sectionSeries(analysis, "signal").length;
     case "Downlink": return sectionSeries(analysis, "downlink").length;
     case "Uplink": return sectionSeries(analysis, "uplink").length;

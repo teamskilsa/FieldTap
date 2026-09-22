@@ -9,8 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { reportFileBase, reportHtml } from "@/lib/report/html";
 import { redactAnalysis } from "@/lib/report/redact";
+import { LOCATION_LOG_CODES } from "@engine/report/privacy";
 import type { CaptureAnalysis } from "@engine/types";
 import { cn } from "@/lib/utils";
+
+/** The codes named in the dialog: the position reports and the NMEA-carrying links, as the reader can check. */
+const LOCATION_CODES = [0x1476, 0x147c, 0x147e, 0x1391, 0x1544]
+  .map((c) => LOCATION_LOG_CODES.find((x) => x.code === c)?.hex ?? "")
+  .join(", ");
 
 /** Hand a string to the browser as a file. An object URL is local to this document; nothing is requested. */
 function save(name: string, mime: string, text: string) {
@@ -80,6 +86,11 @@ export function ExportReport({ analysis, className, label }: {
             IMSI, IMEI, phone numbers, IP addresses and temporary identities; the TAC and the cell identity of
             every cell; the raw bytes of every message. The masking is the engine's own, the same one the screen
             uses while identifiers are hidden.
+          </p>
+          <p className="mt-1.5">
+            The modem's own GNSS records are excluded by log code — its position reports and the QMI links that
+            carry NMEA sentences ({LOCATION_CODES}). A modem trace holds a 5 Hz position track; FieldTap does not
+            decode it and does not write it out.
           </p>
           <p className="mt-1.5">
             Bands, EARFCNs, PCIs, the PLMN, every timing and every measurement are kept — they describe the

@@ -344,6 +344,46 @@ export function ScatterMark({
   );
 }
 
+/**
+ * The PRB allocation strip: one column per logged subframe, filled at exactly the resource blocks the scheduler
+ * gave this phone (0xB126's bitmap). The y scale is the PRB index, so a run of set bits is one rectangle - which is
+ * what makes the picture readable at a glance: a wide block is a big grant, a scatter of thin marks is a cell
+ * handing out fragments.
+ */
+export function AllocationMark({
+  columns, scale, fill, view,
+}: {
+  columns: { t: number; mask: number[] }[];
+  scale: Scale;
+  fill: string;
+  view: [number, number];
+}) {
+  if (!columns.length) return null;
+  const span = Math.max(1, view[1] - view[0]);
+  // One column per subframe would be sub-pixel on a 22 s window, so each is at least a hairline wide.
+  const width = Math.max(1, Math.min(6, (scale.plotW / span) * 20));
+  const rects: { x: number; y: number; h: number }[] = [];
+  for (const c of columns) {
+    const x = scale.x(c.t);
+    let run = -1;
+    const total = c.mask.length * 32;
+    for (let prb = 0; prb <= total; prb++) {
+      const set = prb < total && ((c.mask[prb >> 5] ?? 0) >>> (prb & 31) & 1) === 1;
+      if (set && run < 0) run = prb;
+      else if (!set && run >= 0) {
+        const top = scale.y(prb), bottom = scale.y(run);
+        rects.push({ x, y: top, h: Math.max(1, bottom - top) });
+        run = -1;
+      }
+    }
+  }
+  return (
+    <g>
+      {rects.map((r, i) => <rect key={i} x={r.x} y={r.y} width={width} height={r.h} fill={fill} />)}
+    </g>
+  );
+}
+
 /** Stacked bars: throughput by carrier in each cell's band colour, or a 100% modulation mix. */
 export function StackedMark({
   buckets, keys, colorOf, scale, gap = 2,
@@ -460,6 +500,8 @@ export function badgeHelp(badge: string): string {
     case "medium confidence": return "Decoded with a record layout that still has some uncertainty.";
     case "before Pcmax": return "The power the network asked for, before the device maximum is applied.";
     case "UL scheduled": return "Scheduled uplink capacity, not measured throughput.";
+    case "front-end": return "Measured in the transmit front end, at its own instants: a different quantity from the PUSCH power the network asked for.";
+    case "partial coverage": return "The walk over this record reaches about 80% of the transport blocks it declares, so the figure is a floor, never a total.";
     default: return badge;
   }
 }

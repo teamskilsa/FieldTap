@@ -40,10 +40,42 @@ sample that carries only a carrier index names its cell.
   - The journey may add only `serviceRequest`, `registration` and the PHY peak tiles.
   - Ids are tested for uniqueness separately.
 
+## The second decoder pass (docs/research/iphone-named-log-codes.md, iphone-unknown-log-codes.md)
+
+Seven more records, each ported with the same discipline: strict version dispatch, a runtime self-check with a
+stated expectation, an entry in the availability catalogue, and a test against **both** captures
+(`tests/phy_records_test.ts`: capture2 = driving, iphone-recovered = stationary).
+
+| code | what it gives | the identity its check holds to | measured (driving / stationary) |
+| --- | --- | --- | --- |
+| 0xB126 v163 | transmit antenna ports, receive antennas, rank and the PRB allocation bitmap, 20 subframes per record | popcount(bitmap) is an N_RB 0xB173 reports for the same subframe; rank equals 0xB173's layers (transmit diversity excepted); the ports equal the MIB's count for the serving cell | 99.8% / 99.9%, 100% / 100%, 98.9% / 100% |
+| 0xB12A v161 | the cell's PDCCH load (CFI) | the field is 4 x CFI with CFI in {1,2,3}, and zero exactly when the decode flag is zero | 32,140 / 26,680 elements, no exception |
+| 0xB16C v50 | the uplink grant (start RB, RB count, modulation) and the per-subframe assignment count | the grant equals 0xB139's PUSCH report four subframes later | 2,774 / 4,757 matched grants, all exact |
+| 0xB179 v56 | the intra-frequency neighbour list and the handover margin | `len == 28 + 12n`, and the serving RSRP is 0xB193's own for the same cell | 380/385 and 369/373; 96% / 99% within 1 dB |
+| 0xB063 v50 | MAC downlink accounting (bytes, padding, the per-LCID split) | every transport block is a 0xB173 one on (SFN, subframe, carrier, HARQ, size); coverage is reported, not gated | 98.9% / 99.8%; coverage 79.5% / 81.7% |
+| 0x184C v0x11 | per-chain front-end transmit power, its limit and the PA gain state | the block walk consumes the body exactly; the block's subframe field stays inside 0..9 | 2,391/2,393 and 4,464/4,465 |
+| 0x1D0B v7 | the two modem clocks, as a trace-gap meter | the record sequence number steps by exactly 1 | 1,902/1,913 and 2,237/2,237 |
+
+Two pieces of plumbing came with them:
+
+- **`src/phy/ttiAxis.ts`, the absolute-TTI axis.** SFN x 10 + subframe cycles every 10.24 s and a capture is twice
+  that, so without unwrapping it every cross-record alignment comes out flat. The modem's logging latency is
+  measured from the records that carry both a timestamp and a subframe (0xB173, 0xB139) as a circular mean, and the
+  concentration of that sample (0.9995 on both captures) is itself a self-check.
+- **0xB179 has no DIAG timestamp at all** - every one of its records arrives stamped zero. Its position in the
+  trace gives a rough time and its own in-record TTI fixes the rest, so it is the first record FieldTap places
+  without help from the transport, and it is not counted as "unstamped".
+
+What was deliberately **not** implemented, because validation rejected it: the 5G uplink payloads
+(0xB883/0xB884/0xB885/0xB8A7 MCS, PRB, TBS, power and CQI - they need a capture with a sustained 5G upload),
+0xB16C's 8-byte downlink assignment contents, 0xB111's and 0xB8C9's receive gain, 0xB114's timing scale (about five
+times 0xB062's over the same seconds) and 0xB146's transmit power. Each has an availability entry saying so.
+
 ## Decisions (with the evidence the tests hold)
 
 - **Strict versions.** The decoders accept only B0C1 v2, B0C2 v3, B193 v1/0x19 v66, B173 v50, B139 v162, B14E/B14D
-  v164, B064 v1/0x08 v7, B062 v1/0x06 v50, B97F 3.0, B887 3.13 and B888 3.1.
+  v164, B064 v1/0x08 v7, B062 v1/0x06 v50, B97F 3.0, B887 3.13, B888 3.1, and, from the second pass, B126 v163,
+  B12A v161, B16C v50, B179 v56, B063 v50 (0x32), 0x184C v0x11 and 0x1D0B v7.
   - Any other version is counted in `versionMisses` ('0xB173 v48').
   - It also gets a `version-0xB173` availability entry reading "Not decodable (version 48)".
   - Both real captures have 0 misses, 0 malformed and 0 unstamped PHY records.

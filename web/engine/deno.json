@@ -1,4 +1,8 @@
 {
+  // "imports" exists for one reason: tests/report_privacy_test.ts imports web/app's export builders (which use the
+  // app's own "@engine/..." and "@/..." aliases) so the privacy rule can be asserted against the files the app
+  // actually writes out, not a copy of them. Engine sources import each other by relative path with the extension
+  // and are unaffected.
   "compilerOptions": {
     "strict": true,
     "noImplicitOverride": true,
@@ -16,5 +20,12 @@
     "indentWidth": 2,
     "singleQuote": true,
     "semiColons": true
+  },
+  "imports": {
+    "@engine/types": "./src/types.ts",
+    "@engine/report/privacy": "./src/report/privacy.ts",
+    "@engine/signalling/mask": "./src/signalling/mask.ts",
+    "@/lib/analysis/format": "../app/src/lib/analysis/format.ts",
+    "../app/src/lib/analysis/sample": "../app/src/lib/analysis/sample.ts"
   }
 }

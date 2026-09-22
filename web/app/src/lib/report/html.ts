@@ -11,6 +11,7 @@
 import {
   findingText, fmtDuration, fmtSince, pressWindow, profileLine, recordedAt, signedSeconds,
 } from "@/lib/analysis/format";
+import { LOCATION_EXCLUSION_NOTE } from "@engine/report/privacy";
 import type { CaptureAnalysis } from "@engine/types";
 
 const esc = (v: unknown): string =>
@@ -122,6 +123,7 @@ export function reportHtml(a: CaptureAnalysis, generatedAt = new Date()): string
 IMSI, IMEI, phone numbers, IP addresses, temporary identities, the TAC, the cell identity and the raw message
 bytes are not in this file or in the JSON beside it. Bands, EARFCNs, PCIs, the PLMN, timings and measurements
 are kept: they describe the network, not the person.
+<p>${esc(LOCATION_EXCLUSION_NOTE)}</p>
 </div>
 
 <h2>What this trace covers</h2>

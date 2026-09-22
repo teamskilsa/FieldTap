@@ -12,9 +12,16 @@
 //   - the PDU hex of every message                                                     → dropped
 //   - the TAC and the cell identity of every cell                                      → dropped
 //   - the archive's own file name                                                      → scrubbed
+//   - every trace of a location-bearing record type, by log code                        → dropped
+//
+// The last one is the modem's GNSS subsystem: its own position reports (0x1476, 0x147C-0x147E) and the QMI links
+// that carry NMEA (0x1391, 0x1544). FieldTap decodes none of them, and the export drops them by code anyway, so
+// no census, count or future decoder can put a 5 Hz position track in a file the user shares
+// (@engine/report/privacy, which owns the list).
 //
 // What stays, deliberately: EARFCN, PCI, band, PLMN, timings, counts, measurements and message names. Those
 // describe the *network*, not the person holding the phone, and a report without them says nothing.
+import { stripLocationRecords } from "@engine/report/privacy";
 import { maskField, scrub } from "@engine/signalling/mask";
 import type { CaptureAnalysis, CellDetail, Event, Field, Finding, Marker } from "@engine/types";
 
@@ -48,8 +55,11 @@ const redactMarker = (m: Marker): Marker => ({
   ...(m.detail ? { detail: scrub(m.detail) } : {}),
 });
 
-/** A deep copy of the analysis with every identifier gone. The original object is never touched. */
+/** A deep copy of the analysis with every identifier and every location-bearing record gone. The original object is
+ *  never touched. */
 export function redactAnalysis(analysis: CaptureAnalysis): CaptureAnalysis {
+  // By log code first, so nothing downstream has to remember which records carry a position.
+  analysis = stripLocationRecords(analysis);
   return {
     ...analysis,
     fileName: scrub(analysis.fileName.replace(/^dev:/, "")),
