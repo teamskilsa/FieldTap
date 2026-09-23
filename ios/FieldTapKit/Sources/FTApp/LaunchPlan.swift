@@ -15,6 +15,7 @@ import FTPresentation
 ///     -FTRadioEntry <id>         scroll the Not available list to one catalogue entry ("nrUlSchedule")
 ///     -FTImportState <token>     an import sheet state (ImportState.preview): done, reading..., noBasebandTrace...
 ///     -FTGuideState <token>      a Modem logging guide state (GuideState(token:)): off, expired, expiringSoon...
+///     -FTLiveProbe <token>       a stub live profile-probe result: "live" (installed 2 days ago), "unavailable"
 ///     -FTSecurityDemo <token>    a built-in synthetic Security capture (SecurityDemo): "flagged" | "clean"
 public struct LaunchPlan: Hashable, Sendable {
     public var route: Route?
@@ -28,6 +29,12 @@ public struct LaunchPlan: Hashable, Sendable {
     public var radioEntry: String?
     public var importState: String?
     public var guideState: String?
+    /// A stub live profile-probe result ("live" | "unavailable"), so the live "logging is on" home state can
+    /// be screenshotted without the real system path the simulator lacks.
+    public var liveProbe: String?
+    /// Force the "we noticed a capture" home banner for a screenshot (the real signal is a screenshot plus the
+    /// sysdiagnose directory, neither reproducible in the simulator).
+    public var captureNoticed = false
     /// A built-in synthetic Security capture to list and open, for a Security-screen screenshot without a
     /// capture-derived fixture ("flagged" or "clean"). Invented data only (SecurityDemo).
     public var securityDemo: String?
@@ -36,7 +43,8 @@ public struct LaunchPlan: Hashable, Sendable {
 
     public init(route: Route? = nil, openLatest: Bool = false, fixtureDir: URL? = nil, cursorMs: Double? = nil,
                 event: Int? = nil, filter: FlowFilter? = nil, radioSection: String? = nil, radioEntry: String? = nil,
-                importState: String? = nil, guideState: String? = nil, securityDemo: String? = nil) {
+                importState: String? = nil, guideState: String? = nil, liveProbe: String? = nil,
+                securityDemo: String? = nil) {
         self.route = route
         self.openLatest = openLatest
         self.fixtureDir = fixtureDir
@@ -47,6 +55,7 @@ public struct LaunchPlan: Hashable, Sendable {
         self.radioEntry = radioEntry
         self.importState = importState
         self.guideState = guideState
+        self.liveProbe = liveProbe
         self.securityDemo = securityDemo
     }
 
@@ -54,7 +63,7 @@ public struct LaunchPlan: Hashable, Sendable {
     public var isEmpty: Bool {
         route == nil && !openLatest && fixtureDir == nil && cursorMs == nil && event == nil && filter == nil
             && radioSection == nil && radioEntry == nil && importState == nil && guideState == nil
-            && securityDemo == nil
+            && liveProbe == nil && !captureNoticed && securityDemo == nil
     }
 
     /// True when the plan needs a capture open (a detail page, or -FTOpenLatest, or a Security demo).
@@ -103,6 +112,11 @@ public struct LaunchPlan: Hashable, Sendable {
                 plan.importState = value()
             case "-FTGuideState":
                 plan.guideState = value()
+            case "-FTLiveProbe":
+                plan.liveProbe = value() ?? "live"
+            case "-FTCaptureNoticed":
+                plan.captureNoticed = true
+                if i + 1 < arguments.count, ["YES", "1", "true"].contains(arguments[i + 1]) { i += 1 }
             case "-FTSecurityDemo":
                 plan.securityDemo = value() ?? "flagged"
             default:

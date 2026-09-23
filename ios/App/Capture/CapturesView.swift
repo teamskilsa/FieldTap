@@ -17,13 +17,24 @@ struct CapturesView: View {
     @AppStorage("ft.guide.setupStep") private var setupStep = 0
     /// The state (and removal date) the guide last opened itself for.
     @AppStorage("ft.guide.autoShownFor") private var autoShownFor = ""
+    @State private var watcher = SysdiagnoseWatcher()
+    @State private var showNoticedBanner = false
 
     var body: some View {
         let now = Date()
-        let state = app.guideState(now: now)
+        let resolved = app.resolveGuide(now: now)
+        let state = resolved.state
         List {
+            if showNoticedBanner || app.noticedCaptureDemo {
+                Section {
+                    NoticedCaptureBanner(onImport: { showImporter = true },
+                                         onDismiss: { showNoticedBanner = false })
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+            }
             Section {
-                ModemLoggingStatus(state: state, profile: app.latest?.profile, now: now,
+                ModemLoggingStatus(state: state, profile: app.reminderProfile, now: now, isLive: resolved.isLive,
                                    onGuide: { app.tab = .guide }, onImport: { showImporter = true })
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -87,6 +98,14 @@ struct CapturesView: View {
             _ = await Task.detached(priority: .utility) { ImportLeftovers.sweep(scratch: scratch, keep: keep) }.value
         }
         .task(id: autoOpenKey(state)) { autoOpenGuide(state) }
+        .onReceive(NotificationCenter.default.publisher(for: SysdiagnoseWatcher.screenshotSignal)) { _ in
+            // The sysdiagnose gesture takes a screenshot; if the sysdiagnose directory also looks present,
+            // prompt the user to import when it's ready. Degrades to nothing when the probe finds nothing.
+            if watcher.onScreenshot() {
+                showNoticedBanner = true
+                Task { await watcher.notifyNoticedCapture() }
+            }
+        }
     }
 
     private var deleteShown: Binding<Bool> {

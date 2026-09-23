@@ -40,6 +40,15 @@ public final class AppModel {
     public var importPreview: ImportState?
     /// True once the launch hooks have finished, so a screen report names the screen the launch asked for.
     public var launchSettled = false
+    /// The live profile probe's last result (TestFlight builds; a public-API metadata read of the CommCenter
+    /// logging plist). `.unavailable` on the simulator and on any device where the path is not readable, so
+    /// the guide falls back to the import-derived state. Refreshed at launch and on foreground.
+    public private(set) var liveProfile: ProfileProbeStatus = .unavailable(reason: .notFound(code: 0))
+    /// DEBUG/Harness: -FTLiveProbe, a stub live-probe result so the "logging is on" screenshot can be taken
+    /// without the real system path (which the simulator lacks). Never set in a normal build.
+    public var liveProbeOverride: ProfileProbeStatus?
+    /// DEBUG/Harness: -FTCaptureNoticed, force the SysdiagnoseWatcher's "we noticed a capture" banner.
+    public var noticedCaptureDemo = false
 
     public init(store: any CaptureStoring, importer: any CaptureImporting) {
         self.store = store
@@ -49,9 +58,30 @@ public final class AppModel {
     /// The newest import: the evidence the Modem logging guide works from.
     public var latest: CaptureSummary? { captures.first }
 
-    /// The Modem logging guide's state at `now` (R1), from the newest import unless overridden.
-    public func guideState(now: Date = .now) -> GuideState {
-        guideOverride ?? GuideState.from(latest: latest, now: now)
+    /// Re-runs the live profile probe (or applies the debug override). Cheap: one FileManager metadata call.
+    public func refreshLiveProbe(metadata: any PathMetadataReading = RealPathMetadata()) {
+        liveProfile = liveProbeOverride ?? LiveProfileProbe.probe(metadata: metadata)
+    }
+
+    /// The Modem logging guide's state at `now` (R1). A launch override wins; otherwise the import-derived
+    /// state, with the live device probe folded in only when there is no usable import (the `.unknown`
+    /// placeholder), per `LiveGuideResolver`.
+    public func guideState(now: Date = .now) -> GuideState { resolveGuide(now: now).state }
+
+    /// The resolved guide state plus whether it came from the live device probe (for the "detected on this
+    /// iPhone" note on the status card).
+    public func resolveGuide(now: Date = .now) -> LiveGuideResolver.Resolved {
+        if let override = guideOverride { return .init(state: override, isLive: false) }
+        return LiveGuideResolver.resolve(imported: GuideState.from(latest: latest, now: now),
+                                         live: liveProfile, now: now)
+    }
+
+    /// The profile the expiry reminder is scheduled from: a real import stub (its removal date is exact) when
+    /// present, otherwise the live device probe synthesised into a `ProfileState`.
+    public var reminderProfile: ProfileState? {
+        if let p = latest?.profile, p.removalDate != nil { return p }
+        if case .live(let installed) = liveProfile { return LiveProfileProbe.syntheticProfile(installed: installed) }
+        return latest?.profile
     }
 
     /// Reloads the list from the store (and the fixture, when one is loaded).
@@ -160,6 +190,13 @@ public final class AppModel {
             refresh()
         }
         guideOverride = plan.guideState.flatMap { GuideState(token: $0, now: now) }
+        switch plan.liveProbe {
+        case "live": liveProbeOverride = .live(installed: now.addingTimeInterval(-2 * 86_400))
+        case "unavailable": liveProbeOverride = .unavailable(reason: .notFound(code: 260))
+        default: break
+        }
+        refreshLiveProbe()
+        noticedCaptureDemo = plan.captureNoticed
         if let token = plan.importState {
             importPreview = ImportState.preview(token: token, summary: latest, now: now)
         }

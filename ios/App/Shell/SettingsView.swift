@@ -1,5 +1,6 @@
 import SwiftUI
 import FTApp
+import FTCapture
 import FTCore
 import FTModel
 
@@ -9,6 +10,7 @@ struct SettingsView: View {
     @State private var confirmReveal = false
     @State private var confirmDelete = false
     @State private var storageBytes: Int64 = 0
+    @State private var diagnostics = ProbeDiagnostics.run()
     @AppStorage("ft.reminder.expiry") private var remindExpiry = false
 
     var body: some View {
@@ -57,6 +59,29 @@ struct SettingsView: View {
                 .accessibilityIdentifier("locationExcluded")
             }
 
+            Section {
+                LabeledContent {
+                    Text(diagnostics.profileLine).font(.footnote.monospaced()).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("CommCenter.plist").font(.subheadline)
+                }
+                LabeledContent {
+                    Text(diagnostics.sysdiagnoseLine).font(.footnote.monospaced()).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    Text("sysdiagnose dir").font(.subheadline)
+                }
+                LabeledContent("Live profile status", value: diagnostics.profileLiveActive ? "active" : "off (import-based)")
+                LabeledContent("Capture watcher", value: diagnostics.sysdiagnoseWatchActive ? "active" : "off")
+                Button("Re-run probes") { diagnostics = ProbeDiagnostics.run() }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("What FieldTap's two live status probes return on THIS iPhone. Metadata only — FieldTap never reads these files' contents. These paths are unverified on iOS 26; if both read \"not found\", FieldTap uses the imported sysdiagnose for status instead, which always works.")
+            }
+            .accessibilityIdentifier("diagnosticsSection")
+
             Section("About") {
                 LabeledContent("Version", value: version)
                 LabeledContent("Call-flow contract", value: "v1")
@@ -88,7 +113,7 @@ struct SettingsView: View {
     }
 
     private var reminderFooter: String {
-        if let removal = app.latest?.profile?.removalDate {
+        if let removal = app.reminderProfile?.removalDate {
             return "One notification about a day before Apple's logging profile expires (\(ModemLoggingStatus.format(removal))), so you can renew it before your next test."
         }
         return "One notification about a day before Apple's logging profile expires, so you can renew it before your next test. It's scheduled from your newest import."
@@ -99,7 +124,7 @@ struct SettingsView: View {
     private var reminderBinding: Binding<Bool> {
         Binding(get: { remindExpiry }, set: { on in
             remindExpiry = on
-            let profile = app.latest?.profile
+            let profile = app.reminderProfile
             Task { @MainActor in
                 if on {
                     guard await ProfileReminder.requestPermission() else { remindExpiry = false; return }

@@ -10,6 +10,7 @@ enum ProfileReminder {
     static let expiryId = "ft.profile.expiry"
     static let doItNowId = "ft.capture.doItNow"
     static let readyId = "ft.capture.ready"
+    static let noticedId = "ft.capture.noticed"
 
     /// Asks for permission (iOS asks the user only the first time). Called when a reminder is turned on.
     static func requestPermission() async -> Bool {
@@ -36,6 +37,16 @@ enum ProfileReminder {
     static func scheduleDoItNow(after interval: TimeInterval) async {
         await add(doItNowId, after: interval, title: "Do it now",
                   body: "Make the problem happen now: place the call, open the app, or go to the spot.")
+    }
+
+    /// The SysdiagnoseWatcher spotted a likely sysdiagnose (a screenshot plus the sysdiagnose directory
+    /// present). Best-effort: only fires if notifications are already authorised, so it never prompts for
+    /// permission on a screenshot. Fires a few seconds out so it lands after the user leaves for Settings.
+    static func notifyNoticedCapture() async {
+        let center = UNUserNotificationCenter.current()
+        guard (await center.notificationSettings()).authorizationStatus == .authorized else { return }
+        await add(noticedId, after: 3, title: "Did you just take a sysdiagnose?",
+                  body: "When it's ready, open Settings > Privacy & Security > Analytics & Improvements > Analytics Data and share the newest sysdiagnose into FieldTap.")
     }
 
     static func cancelCapture() {

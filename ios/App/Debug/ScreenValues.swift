@@ -53,6 +53,9 @@ enum ScreenValues {
             "cardCount": n(app.captures.count),
             "fixtureLoaded": .bool(app.fixture != nil),
             "guideStatus": .string(app.guideState().token),
+            "guideIsLive": .bool(app.resolveGuide().isLive),
+            "liveProbe": .bool(app.liveProfile.isLive),
+            "noticedBanner": .bool(app.noticedCaptureDemo),
         ]
         if let latest = app.latest {
             v["latestProblems"] = .strings(latest.problems.map(\.token))

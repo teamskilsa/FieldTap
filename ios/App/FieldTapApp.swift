@@ -17,13 +17,18 @@ struct FieldTapApp: App {
                     #else
                     app.refresh()
                     #endif
+                    // TestFlight live profile-status probe (fails gracefully to import-based state).
+                    app.refreshLiveProbe()
                     // A sysdiagnose shared to FieldTap while it was closed waits in the App Group Inbox.
                     app.ingestSharedInbox()
                     app.launchSettled = true
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // The share happens in another process; pick up anything it left each time we come forward.
-                    if phase == .active { app.ingestSharedInbox() }
+                    if phase == .active {
+                        app.refreshLiveProbe()
+                        app.ingestSharedInbox()
+                    }
                 }
                 .onOpenURL { url in
                     // "Share > FieldTap" and "Open in" hand over a copy in Documents/Inbox (opening in place is off);

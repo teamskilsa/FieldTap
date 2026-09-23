@@ -22,8 +22,9 @@ struct ModemLoggingGuideView: View {
 
     var body: some View {
         let now = Date()
-        let state = app.guideState(now: now)
-        let profile = app.latest?.profile
+        let resolved = app.resolveGuide(now: now)
+        let state = resolved.state
+        let profile = app.reminderProfile
         let doneKey = Self.key(state, app.latest)
         let showSetup = state.needsSetup && doneFor != doneKey
         ScrollViewReader { proxy in
@@ -36,7 +37,7 @@ struct ModemLoggingGuideView: View {
                         ProfileReminder.cancelCapture()
                     }
                 }
-                ModemLoggingStatus(state: state, profile: profile, now: now)
+                ModemLoggingStatus(state: state, profile: profile, now: now, isLive: resolved.isLive)
                 if showSetup {
                     StepFlow(title: Self.setupTitle(state), steps: setupSteps(profile), index: $setupStep) {
                         doneFor = doneKey

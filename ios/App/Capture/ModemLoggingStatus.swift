@@ -54,6 +54,9 @@ struct ModemLoggingStatus: View {
     var state: GuideState
     var profile: ProfileState?
     var now: Date
+    /// True when `state` came from the live on-device probe (TestFlight) rather than an import, so the card
+    /// says the estimate was detected on this iPhone.
+    var isLive: Bool = false
     /// Buttons under the card (the Captures tab has "Guide" and "Import"); none in the guide.
     var onGuide: (() -> Void)?
     var onImport: (() -> Void)?
@@ -80,6 +83,12 @@ struct ModemLoggingStatus: View {
                 .accessibilityIdentifier("guideHeadline")
             if let detail {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if isLive {
+                Label("Detected on this iPhone. The date is an estimate (install + \(lifetime) days); import a sysdiagnose to confirm.",
+                      systemImage: "dot.radiowaves.left.and.right")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("liveProbeNote")
             }
             if case .active = state, onGuide == nil {
                 Button {
