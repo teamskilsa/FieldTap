@@ -9,6 +9,7 @@ import FTJourney
 import FTModel
 import FTPhy
 import FTPresentation
+import FTSecurity
 
 @MainActor
 enum ScreenValues {
@@ -23,7 +24,25 @@ enum ScreenValues {
         case .callflow: session.map { callflow($0) } ?? [:]
         case .message: session.map { message($0) } ?? [:]
         case .radio: session.map { radio($0) } ?? [:]
+        case .security: session.map { security($0) } ?? [:]
         }
+    }
+
+    /// The Security screen: the verdict, how many findings and cells the report has, and which checks fired.
+    private static func security(_ s: CaptureSession) -> [String: ScreenValue] {
+        let report = s.analysis.security ?? SecurityDetector.analyze(s.analysis)
+        let all = report.allFindings
+        return [
+            "verdict": .string(report.verdict.rawValue),
+            "findingCount": n(all.count),
+            "cellCount": n(report.cells.count),
+            "unattachedCount": n(report.findings.count),
+            "firedChecks": .strings(all.map { $0.check.rawValue }),
+            "checksRun": n(report.checksRun.count),
+            "gapCount": n(report.gaps.count),
+            "ruleset": .string(report.ruleset),
+            "bottomInset": n(Int(CapturePageLayout.scrollBottomInset)),
+        ]
     }
 
     private static func n(_ v: Int) -> ScreenValue { .number(Double(v)) }

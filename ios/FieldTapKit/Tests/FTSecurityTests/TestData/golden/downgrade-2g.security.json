@@ -1,0 +1,60 @@
+{
+  "verdict": "suspicious",
+  "headline": "This capture carries Layer-3 signatures associated with fake base stations. Review each finding — this is evidence to check, not proof.",
+  "cells": [
+    {
+      "cell": {
+        "earfcn": 100,
+        "pci": 11,
+        "nr": false
+      },
+      "verdict": "suspicious",
+      "findings": [
+        {
+          "id": "ratDowngrade-1",
+          "check": "ratDowngrade",
+          "severity": "suspicious",
+          "title": "Forced 2G downgrade",
+          "explanation": "The network pushed the phone down to 2G (GERAN), which has the weakest security. Forcing a modern phone onto 2G is a classic catcher move to make interception easier.",
+          "evidence": [
+            "RRC Connection Release: Redirected to = GERAN"
+          ],
+          "event": 1,
+          "tMs": 100,
+          "cell": {
+            "earfcn": 100,
+            "pci": 11,
+            "nr": false
+          }
+        }
+      ],
+      "band": "B12"
+    }
+  ],
+  "findings": [],
+  "checksRun": [
+    "nullCipher",
+    "noSecurityEstablished",
+    "imsiRequestedInClear",
+    "ratDowngrade",
+    "acceptedWithoutAuth",
+    "abnormalReject",
+    "implausibleSignal",
+    "orphanCell"
+  ],
+  "gaps": [
+    {
+      "check": "sibNeighbourList",
+      "reason": "SIB neighbour lists and full measurement configurations are not decoded, so \"advertised neighbour\" cannot be read directly; the orphan-cell check falls back to measured neighbours and mobility context only."
+    },
+    {
+      "check": "asSecurityAlgorithm",
+      "reason": "The RRC Security Mode Command is decoded by name but its chosen AS ciphering/integrity algorithm is not exposed, so AS null-algorithm cannot be read; null-algorithm detection uses the NAS Security Mode Command."
+    },
+    {
+      "check": "sibAuthenticity",
+      "reason": "SIB1/SI are decoded for cell identity but not cross-checked for broadcast tampering (e.g. a spoofed cell barring or PLMN), which would need fields the current SIB decode does not surface."
+    }
+  ],
+  "ruleset": "fieldtap-security/1"
+}

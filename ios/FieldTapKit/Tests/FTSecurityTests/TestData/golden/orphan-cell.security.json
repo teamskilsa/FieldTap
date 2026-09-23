@@ -1,0 +1,59 @@
+{
+  "verdict": "warning",
+  "headline": "1 thing worth a look — most have an ordinary explanation. Read the reasons before drawing a conclusion.",
+  "cells": [
+    {
+      "cell": {
+        "earfcn": 200,
+        "pci": 22,
+        "nr": false
+      },
+      "verdict": "warning",
+      "findings": [
+        {
+          "id": "orphanCell",
+          "check": "orphanCell",
+          "severity": "warning",
+          "title": "Cell reached without mobility context",
+          "explanation": "The phone connected on this cell without a normal handover or reselection into it, and it was never measured as a neighbour. That can happen with ordinary load-balancing, but it is also how a catcher inserts a cell the real network never advertised.",
+          "evidence": [
+            "EARFCN 200 PCI 22: no handover/reselection step, not in any neighbour measurement"
+          ],
+          "cell": {
+            "earfcn": 200,
+            "pci": 22,
+            "nr": false
+          },
+          "tMs": 9000
+        }
+      ],
+      "band": "B66"
+    }
+  ],
+  "findings": [],
+  "checksRun": [
+    "nullCipher",
+    "noSecurityEstablished",
+    "imsiRequestedInClear",
+    "ratDowngrade",
+    "acceptedWithoutAuth",
+    "abnormalReject",
+    "implausibleSignal",
+    "orphanCell"
+  ],
+  "gaps": [
+    {
+      "check": "sibNeighbourList",
+      "reason": "SIB neighbour lists and full measurement configurations are not decoded, so \"advertised neighbour\" cannot be read directly; the orphan-cell check falls back to measured neighbours and mobility context only."
+    },
+    {
+      "check": "asSecurityAlgorithm",
+      "reason": "The RRC Security Mode Command is decoded by name but its chosen AS ciphering/integrity algorithm is not exposed, so AS null-algorithm cannot be read; null-algorithm detection uses the NAS Security Mode Command."
+    },
+    {
+      "check": "sibAuthenticity",
+      "reason": "SIB1/SI are decoded for cell identity but not cross-checked for broadcast tampering (e.g. a spoofed cell barring or PLMN), which would need fields the current SIB decode does not surface."
+    }
+  ],
+  "ruleset": "fieldtap-security/1"
+}

@@ -118,6 +118,13 @@ public final class AppModel {
         refresh()
     }
 
+    /// Lists a synthetic, already-analysed capture as the fixture (e.g. the built-in Security demo). Plain logic
+    /// only the DEBUG/Harness launch hooks call; dead-stripped from a Release app that never references it.
+    public func loadSynthetic(_ analysis: CaptureAnalysis) {
+        fixture = analysis
+        refresh()
+    }
+
     /// Deletes every stored capture (Settings). The fixture, if any, is only forgotten.
     public func deleteAll() throws {
         for summary in try store.list() { try store.delete(summary.id) }
@@ -141,7 +148,9 @@ public final class AppModel {
 
     /// Applies a launch plan (DEBUG/Harness): loads the fixture, sets the overrides, opens a capture and routes.
     public func apply(_ plan: LaunchPlan, now: Date = .now) async {
-        if let dir = plan.fixtureDir {
+        if let token = plan.securityDemo {
+            loadSynthetic(SecurityDemo.analysis(token))
+        } else if let dir = plan.fixtureDir {
             do {
                 try await loadFixture(dir: dir)
             } catch {
@@ -155,7 +164,7 @@ public final class AppModel {
             importPreview = ImportState.preview(token: token, summary: latest, now: now)
         }
 
-        let route = plan.route ?? (plan.needsCapture ? .overview : .captures)
+        let route = plan.route ?? (plan.securityDemo != nil ? .security : (plan.needsCapture ? .overview : .captures))
         tab = route.tab
         if plan.needsCapture, let id = latest?.id, let session = await show(id) {
             if let page = route.page { session.page = page }

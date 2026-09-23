@@ -15,6 +15,7 @@ import FTPresentation
 ///     -FTRadioEntry <id>         scroll the Not available list to one catalogue entry ("nrUlSchedule")
 ///     -FTImportState <token>     an import sheet state (ImportState.preview): done, reading..., noBasebandTrace...
 ///     -FTGuideState <token>      a Modem logging guide state (GuideState(token:)): off, expired, expiringSoon...
+///     -FTSecurityDemo <token>    a built-in synthetic Security capture (SecurityDemo): "flagged" | "clean"
 public struct LaunchPlan: Hashable, Sendable {
     public var route: Route?
     public var openLatest = false
@@ -27,12 +28,15 @@ public struct LaunchPlan: Hashable, Sendable {
     public var radioEntry: String?
     public var importState: String?
     public var guideState: String?
+    /// A built-in synthetic Security capture to list and open, for a Security-screen screenshot without a
+    /// capture-derived fixture ("flagged" or "clean"). Invented data only (SecurityDemo).
+    public var securityDemo: String?
     /// Arguments that looked like ours but could not be read, reported rather than ignored.
     public var problems: [String] = []
 
     public init(route: Route? = nil, openLatest: Bool = false, fixtureDir: URL? = nil, cursorMs: Double? = nil,
                 event: Int? = nil, filter: FlowFilter? = nil, radioSection: String? = nil, radioEntry: String? = nil,
-                importState: String? = nil, guideState: String? = nil) {
+                importState: String? = nil, guideState: String? = nil, securityDemo: String? = nil) {
         self.route = route
         self.openLatest = openLatest
         self.fixtureDir = fixtureDir
@@ -43,16 +47,18 @@ public struct LaunchPlan: Hashable, Sendable {
         self.radioEntry = radioEntry
         self.importState = importState
         self.guideState = guideState
+        self.securityDemo = securityDemo
     }
 
     /// True when nothing was asked for: a normal launch.
     public var isEmpty: Bool {
         route == nil && !openLatest && fixtureDir == nil && cursorMs == nil && event == nil && filter == nil
             && radioSection == nil && radioEntry == nil && importState == nil && guideState == nil
+            && securityDemo == nil
     }
 
-    /// True when the plan needs a capture open (a detail page, or -FTOpenLatest).
-    public var needsCapture: Bool { openLatest || route?.page != nil }
+    /// True when the plan needs a capture open (a detail page, or -FTOpenLatest, or a Security demo).
+    public var needsCapture: Bool { openLatest || securityDemo != nil || route?.page != nil }
 
     public static func parse(_ info: ProcessInfo) -> LaunchPlan { parse(arguments: Array(info.arguments.dropFirst())) }
 
@@ -97,6 +103,8 @@ public struct LaunchPlan: Hashable, Sendable {
                 plan.importState = value()
             case "-FTGuideState":
                 plan.guideState = value()
+            case "-FTSecurityDemo":
+                plan.securityDemo = value() ?? "flagged"
             default:
                 break
             }

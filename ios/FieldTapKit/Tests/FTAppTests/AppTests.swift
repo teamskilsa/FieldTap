@@ -52,7 +52,8 @@ struct NoImporter: CaptureImporting {
     @Test func routesKnowTheirTabAndPage() {
         #expect(Route.message.page == .callflow && Route.message.tab == .captures)
         #expect(Route.guide.tab == .guide && Route.guide.page == nil)
-        #expect(DetailPage.allCases.map(\.route) == [.overview, .callflow, .radio])
+        #expect(DetailPage.allCases.map(\.route) == [.overview, .callflow, .radio, .security])
+        #expect(Route.security.page == .security && Route.security.tab == .captures)
     }
 }
 

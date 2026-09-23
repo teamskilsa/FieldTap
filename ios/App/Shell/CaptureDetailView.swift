@@ -30,7 +30,7 @@ struct CaptureDetailView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 300)
+                    .frame(maxWidth: 360)
                     .accessibilityIdentifier("detailPagePicker")
                 }
             }
@@ -50,6 +50,7 @@ struct CaptureDetailView: View {
         case .overview: OverviewPage(session: session)
         case .callflow: CallFlowPage(session: session)
         case .radio: RadioPage(session: session)
+        case .security: SecurityPage(session: session)
         }
     }
 

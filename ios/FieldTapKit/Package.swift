@@ -14,7 +14,8 @@ let package = Package(
     products: [
         .library(
             name: "FieldTapKit",
-            targets: ["FTModel", "FTCore", "FTSignalling", "FTPresentation", "FTCapture", "FTPhy", "FTJourney", "FTApp"]
+            targets: ["FTModel", "FTCore", "FTSignalling", "FTPresentation", "FTCapture", "FTPhy", "FTJourney",
+                      "FTSecurity", "FTApp"]
         ),
     ],
     targets: [
@@ -33,11 +34,15 @@ let package = Package(
         .target(name: "FTPhy", dependencies: ["FTModel", "FTCore"]),
         // Journey lanes, markers, findings, KPI tiles (WP5). Reads PHY series through FTPhy's PhyQuery.
         .target(name: "FTJourney", dependencies: ["FTModel", "FTCore", "FTPhy"]),
+        // The local, no-network fake-base-station / IMSI-catcher check. Reads only FTModel value types and
+        // returns FTModel.SecurityReport; matches the browser engine's `fieldtap-security/1` goldens.
+        .target(name: "FTSecurity", dependencies: ["FTModel"]),
         // App state and orchestration that is testable without a view: AppModel, CaptureSession, Analyzer,
         // FixtureLoader, LaunchPlan, ScreenReport (WP0).
         .target(
             name: "FTApp",
-            dependencies: ["FTModel", "FTCore", "FTSignalling", "FTPresentation", "FTCapture", "FTPhy", "FTJourney"]
+            dependencies: ["FTModel", "FTCore", "FTSignalling", "FTPresentation", "FTCapture", "FTPhy", "FTJourney",
+                           "FTSecurity"]
         ),
         // Fixture lookup, FT_REQUIRE_FIXTURES and JSON assertions for every test target (WP0).
         .target(name: "FTTestSupport", dependencies: ["FTModel", "FTCore"]),
@@ -55,6 +60,8 @@ let package = Package(
         .testTarget(name: "FTPhyTests", dependencies: ["FTPhy", "FTModel", "FTCore", "FTTestSupport"],
                     resources: [.copy("TestData")]),
         .testTarget(name: "FTJourneyTests", dependencies: ["FTJourney", "FTPhy", "FTModel", "FTCore", "FTTestSupport"],
+                    resources: [.copy("TestData")]),
+        .testTarget(name: "FTSecurityTests", dependencies: ["FTSecurity", "FTModel", "FTApp", "FTTestSupport"],
                     resources: [.copy("TestData")]),
         .testTarget(name: "FTAppTests", dependencies: ["FTApp", "FTModel", "FTCore", "FTCapture", "FTTestSupport"],
                     resources: [.copy("TestData")]),

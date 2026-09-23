@@ -1,6 +1,6 @@
 /// Every screen a launch argument (-FTScreen) or a screen report can name.
 public enum Route: String, CaseIterable, Codable, Hashable, Sendable {
-    case captures, guide, settings, importSheet, overview, callflow, radio, message
+    case captures, guide, settings, importSheet, overview, callflow, radio, security, message
 
     /// The capture-detail page this route shows, if it is one.
     public var page: DetailPage? {
@@ -8,6 +8,7 @@ public enum Route: String, CaseIterable, Codable, Hashable, Sendable {
         case .overview: .overview
         case .callflow, .message: .callflow
         case .radio: .radio
+        case .security: .security
         default: nil
         }
     }
@@ -22,15 +23,16 @@ public enum Route: String, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
-/// The three pages of an open capture, switched by the toolbar picker.
+/// The pages of an open capture, switched by the toolbar picker.
 public enum DetailPage: String, CaseIterable, Codable, Hashable, Sendable {
-    case overview, callflow, radio
+    case overview, callflow, radio, security
 
     public var route: Route {
         switch self {
         case .overview: .overview
         case .callflow: .callflow
         case .radio: .radio
+        case .security: .security
         }
     }
 
@@ -39,6 +41,7 @@ public enum DetailPage: String, CaseIterable, Codable, Hashable, Sendable {
         case .overview: "Overview"
         case .callflow: "Call flow"
         case .radio: "Radio"
+        case .security: "Security"
         }
     }
 }
