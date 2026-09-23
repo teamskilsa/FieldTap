@@ -8,6 +8,11 @@ a decoder that reads the wrong bits gets nonsense, not a plausible number.
 
 Values are realistic: a serving cell at about -95 dBm, neighbours a few dB weaker.
 What these cannot prove is that the layouts match real modems (docs/CORPUS.md).
+
+The builders after "iPhone 17 layouts" pack the record versions the iPhone 17 (M25)
+modem logs, as web/engine/src/phy/decoders/*.ts describe them; those layouts were
+validated on the real captures, and tests/test_decode_real_iphone.py replays one when
+FT_REAL_QMDL points at it.
 """
 
 from __future__ import annotations
@@ -329,12 +334,13 @@ def mib_body(version: int = 2, pci: int = 101, earfcn: int = 1850, sfn: int = 51
 
 def mac_subheaders(entries) -> bytes:
     """TS 36.321 sub-headers from [(lcid, length or None), ...]; E set on all but the last,
-    F/L only for SDU LCIDs (0..10) that are not last."""
+    F/L for SDU LCIDs (0..10) that are not last and for any entry given a length (the
+    uplink's variable-size CEs, LCID 24/25)."""
     out = bytearray()
     for i, (lcid, length) in enumerate(entries):
         last = i == len(entries) - 1
         out.append((0 if last else 0x20) | lcid)
-        if not last and lcid <= 10:
+        if not last and (lcid <= 10 or length is not None):
             assert length is not None
             if length < 128:
                 out.append(length)
@@ -366,9 +372,13 @@ def mac_tb_body(downlink: bool, sp_version: int, samples=None, container_version
         else:
             fixed = struct.pack("<BBHHBHBBB", s["harq_id"], s["rnti_type"], subfn, s["grant_bytes"], s["rlc_pdus"],
                                 s["padding_bytes"], s["bsr_event"], s["bsr_trigger"], len(hdr))
-            if sp_version != 1:
+            if sp_version == 7:                     # iPhone 17: the cell id alone leads the v1 order
+                fixed = bytes([s["cell_id"]]) + fixed
+            elif sp_version != 1:
                 fixed = struct.pack("<BB", s["sub_id"], s["cell_id"]) + fixed
         payload += fixed + hdr
+    if sp_version == 7 and len(payload) % 4:        # v7 pads its subpacket to a multiple of 4 bytes
+        payload += _fill(4 - len(payload) % 4)
     subpackets = [struct.pack("<BBH", subpacket_id, sp_version, 4 + len(payload)) + bytes(payload)]
     for sp_id, ver, extra in extra_subpackets:
         subpackets.append(struct.pack("<BBH", sp_id, ver, 4 + len(extra)) + extra)
@@ -433,6 +443,291 @@ PUSCH_GRANT = {"sfn": 512, "subframe": 8, "coding_rate_raw": 614, "ack": 1, "cqi
                "cqi_payload": bytes(range(16)), "tx_resampler": 0x01020304, "num_repetition": 1, "rb_nb_start": 0}
 PUSCH_GRANT_RETX = dict(PUSCH_GRANT, sfn=513, subframe=2, rv=2, retx_index=1, tx_power_dbm=-7, mod_order=1,
                         tb_size=1736, ack=0)
+
+
+# ============================================================================================
+# iPhone 17 layouts
+# ============================================================================================
+
+# --- 0xB193 subpacket 0x19 v66 (b193.ts) ---------------------------------------------------------
+
+IPHONE_CELL = {
+    "pci": 80, "serving_cell_index": 0, "is_serving": 1, "rx_map": 3,
+    "rsrp_rx": [-113.0, -115.25, None, None], "rsrp": -113.0, "filtered_rsrp": -113.5,
+    "rsrq_rx": [-15.0, -14.5, None, None], "rsrq": -14.5, "filtered_rsrq": -14.75,
+    "rssi_rx": [-82.0, -83.5, None, None], "rssi": -82.0,
+}
+IPHONE_SCELL = dict(IPHONE_CELL, pci=235, serving_cell_index=1, rx_map=15,
+                    rsrp_rx=[-100.0, -101.0, -102.0, -103.0], rsrp=-100.5, filtered_rsrp=-101.0,
+                    rsrq_rx=[-9.0, -9.5, -10.0, -10.5], rsrq=-9.25, filtered_rsrq=-9.5,
+                    rssi_rx=[-70.0, -71.0, -72.0, -73.0], rssi=-70.5)
+IPHONE_NEIGHBOUR = dict(IPHONE_CELL, pci=388, is_serving=0, serving_cell_index=0, rx_map=15,
+                        rsrp_rx=[-116.0, -117.0, -118.0, -119.0], rsrp=-116.5, filtered_rsrp=-117.0,
+                        rsrq_rx=[-17.0, -17.5, -18.0, -18.5], rsrq=-17.25, filtered_rsrq=-17.5,
+                        rssi_rx=[-84.0, -85.0, -86.0, -87.0], rssi=-84.5)
+
+
+def scmr_v66_cell(c) -> bytes:
+    """One 144-byte v66 cell record: u32 Rx map @0, PCI word @8, measurement words @24 + 4*i."""
+    out = struct.pack("<I", c["rx_map"]) + _fill(4)
+    out += _word(2, (c["pci"], 0, 9), (c["serving_cell_index"], 9, 3), (c["is_serving"], 15, 1)) + _fill(14)
+    out += (_word(4, (_opt(c["rsrp_rx"], 0, rsrp_raw), 10, 12))
+            + _word(4, (_opt(c["rsrp_rx"], 1, rsrp_raw), 12, 12))
+            + _word(4, (_opt(c["rsrp_rx"], 2, rsrp_raw), 12, 12))
+            + _fill(4)
+            + _word(4, (_opt(c["rsrp_rx"], 3, rsrp_raw), 0, 12), (rsrp640_raw(c["rsrp"]), 12, 12))
+            + _word(4, (rsrp_raw(c["filtered_rsrp"]), 12, 12))
+            + _word(4, (_opt(c["rsrq_rx"], 0, rsrq_raw), 0, 10), (_opt(c["rsrq_rx"], 1, rsrq_raw), 20, 10))
+            + _word(4, (_opt(c["rsrq_rx"], 2, rsrq_raw), 10, 10), (_opt(c["rsrq_rx"], 3, rsrq_raw), 20, 10))
+            + _word(4, (rsrq_raw(c["rsrq"]), 0, 10), (rsrq_raw(c["filtered_rsrq"]), 20, 10))
+            + _word(4, (_opt(c["rssi_rx"], 0, rssi_raw), 0, 11), (_opt(c["rssi_rx"], 1, rssi_raw), 11, 11))
+            + _word(4, (_opt(c["rssi_rx"], 2, rssi_raw), 0, 11), (_opt(c["rssi_rx"], 3, rssi_raw), 11, 11))
+            + _word(4, (rssi_raw(c["rssi"]), 0, 11)))
+    out += _fill(72)
+    assert len(out) == 144
+    return out
+
+
+def ml1_scell_meas_v66_body(cells=None, earfcn: int = 650, valid_rx: int = 0) -> bytes:
+    """0xB193 v1 container with one subpacket 0x19 v66 (u32 EARFCN, u16 cells, u16 valid-Rx flags, 144-byte cells)."""
+    cells = list(cells or [IPHONE_CELL])
+    payload = struct.pack("<IHH", earfcn, len(cells), valid_rx) + b"".join(scmr_v66_cell(c) for c in cells)
+    subpacket = struct.pack("<BBH", SUBPACKET_SCMR, 66, 4 + len(payload)) + payload
+    return struct.pack("<BB", 1, 1) + _fill(2) + subpacket
+
+
+# --- 0xB179 v56 (b179.ts) -------------------------------------------------------------------------
+
+INTRA_V56_NEIGHBOURS = [(235, -116.25, -17.5), (388, -120.0, -19.0)]
+
+
+def intra_meas_v56_body(earfcn: int = 650, pci: int = 80, tti: int = 2093, rsrp: float = -113.5, rsrq: float = -13.5,
+                        neighbours=None, unidentified: int = 9, trailing: bytes = b"") -> bytes:
+    """Flat v56 body: 28-byte header then 12-byte neighbours; `trailing` breaks the length identity."""
+    neighbours = INTRA_V56_NEIGHBOURS if neighbours is None else neighbours
+    out = bytes([56]) + _fill(3) + struct.pack("<IIHH", unidentified, earfcn, pci, tti)
+    out += struct.pack("<HHHH", rsrp_raw(rsrp), rsrp_raw(rsrp), rsrq_raw(rsrq), rsrq_raw(rsrq))
+    out += struct.pack("<I", len(neighbours))
+    for n_pci, n_rsrp, n_rsrq in neighbours:
+        out += struct.pack("<HHHHHH", n_pci, rsrp_raw(n_rsrp), rsrp_raw(n_rsrp), rsrq_raw(n_rsrq), rsrq_raw(n_rsrq), 0)
+    return out + trailing
+
+
+# --- 0xB173 v50 (b173.ts) -------------------------------------------------------------------------
+
+PDSCH_V50_TB = {"harq_id": 6, "rv": 0, "ndi": 1, "crc_pass": 1, "rnti_type": 0, "tb_index": 0, "tb_size": 2792,
+                "mcs": 20, "num_rbs": 25, "qm": 6}
+PDSCH_V50_TB_FAILED = dict(PDSCH_V50_TB, harq_id=7, rv=2, ndi=0, crc_pass=0, tb_index=1, tb_size=1608, mcs=14, qm=4)
+PDSCH_V50_RECORD = {"sfn": 512, "subframe": 3, "num_layers": 2, "carrier": 0, "tbs": [PDSCH_V50_TB, PDSCH_V50_TB_FAILED]}
+PDSCH_V50_RECORD_ONE_TB = {"sfn": 513, "subframe": 4, "num_layers": 1, "carrier": 1, "tbs": [dict(PDSCH_V50_TB, tb_size=7, mcs=0,
+                                                                                               num_rbs=3, qm=2)]}
+
+
+def pdsch_stat_v50_body(records=None) -> bytes:
+    """4-byte header, 40-byte records with two 12-byte TB slots at 12 and 24."""
+    records = [PDSCH_V50_RECORD, PDSCH_V50_RECORD_ONE_TB] if records is None else records
+    out = bytes([50, len(records)]) + _fill(2)
+    for r in records:
+        out += struct.pack("<H", (r["sfn"] << 4) | r["subframe"]) + bytes([r["num_layers"], len(r["tbs"]), r["carrier"] | 0xF8])
+        out += _fill(7)
+        for j in range(2):
+            if j < len(r["tbs"]):
+                tb = r["tbs"][j]
+                hb = tb["harq_id"] | tb["rv"] << 4 | tb["ndi"] << 6 | tb["crc_pass"] << 7
+                rw = tb["rnti_type"] | tb["tb_index"] << 4
+                out += struct.pack("<BH", hb, rw) + _fill(1) + struct.pack("<HBBB", tb["tb_size"], tb["mcs"], tb["num_rbs"], tb["qm"])
+                out += _fill(3)
+            else:
+                out += _fill(12)
+        out += _fill(4)
+    return out
+
+
+# --- 0xB139 v162 (b139.ts) ------------------------------------------------------------------------
+
+PUSCH_V162_GRANT = {"tti": 5128, "carrier": 0, "retx_index": 0, "start_rb": 12, "num_rbs": 20, "tb_size": 1736,
+                    "coding_rate_raw": 614, "modulation_code": 2, "power_raw": 90}
+PUSCH_V162_GRANT_RETX = dict(PUSCH_V162_GRANT, tti=5132, retx_index=1, modulation_code=1, power_raw=62, start_rb=30, num_rbs=8,
+                             tb_size=328)
+
+
+def pusch_tx_v162_body(grants=None, serving_cell_id: int = 80, dispatch_sfn_sf: int = 0x2008) -> bytes:
+    """8-byte header (serving cell 9b | count 5b), 100-byte records."""
+    grants = [PUSCH_V162_GRANT, PUSCH_V162_GRANT_RETX] if grants is None else grants
+    out = bytes([162]) + _word(2, (serving_cell_id, 0, 9), (len(grants), 9, 5)) + _fill(1)
+    out += struct.pack("<H", dispatch_sfn_sf) + _fill(2)
+    for g in grants:
+        rec = _word(4, (g["tti"], 0, 16), (g["carrier"], 16, 2), (g["retx_index"], 23, 5))
+        rec += _word(4, (g["start_rb"], 1, 7), (g["num_rbs"], 15, 7))
+        rec += struct.pack("<HH", g["tb_size"], g["coding_rate_raw"])
+        rec += _fill(24) + _word(1, (g["modulation_code"], 2, 3)) + _fill(9) + bytes([g["power_raw"]]) + _fill(53)
+        assert len(rec) == 100
+        out += rec
+    return out
+
+
+# --- 0xB063 v50 (lteMac.ts decodeB063) ------------------------------------------------------------
+
+# an SDU is (control, lcid, length_bytes, tail_words): the descriptor's byte 9 is tail_words,
+# and a tail of 8 * tail_words bytes follows the block's descriptors
+MAC_DL_V50_BLOCK = {"size_bytes": 1421, "padding_bytes": 3, "sfn": 512, "subframe": 3, "carrier": 0, "harq_id": 5,
+                    "header_length": 6, "sdus": [(0, 3, 1290, 2), (1, 29, 1, 0)]}
+MAC_DL_V50_BLOCK_NEXT = {"size_bytes": 7, "padding_bytes": 2, "sfn": 513, "subframe": 1, "carrier": 1, "harq_id": 1,
+                         "header_length": 3, "sdus": [(0, 1, 2, 0)]}
+
+
+def mac_dl_tb_v50_body(blocks=None, declared=None, tail_extra=None) -> bytes:
+    """u8 0x32, 3 reserved, u32 count; 16-byte TB headers, 12-byte SDU descriptors, 8 x byte-9 tails.
+    tail_extra {block index: bytes} appends undeclared tail bytes, which makes the walk resync."""
+    blocks = [MAC_DL_V50_BLOCK, MAC_DL_V50_BLOCK_NEXT] if blocks is None else blocks
+    tail_extra = tail_extra or {}
+    out = bytes([0x32]) + _fill(3) + struct.pack("<I", len(blocks) if declared is None else declared)
+    for i, b in enumerate(blocks):
+        out += struct.pack("<II", b["size_bytes"], b["padding_bytes"])
+        out += _word(4, (b["sfn"], 0, 10), (b["subframe"], 10, 4))
+        out += bytes([b["carrier"] | b["harq_id"] << 4, len(b["sdus"])]) + struct.pack("<H", b["header_length"])
+        tail = 0
+        for control, lcid, length, tail_words in b["sdus"]:
+            word = control | lcid << 1 | length << 7
+            out += word.to_bytes(3, "little") + _fill(6) + bytes([tail_words]) + _fill(2)
+            tail += 8 * tail_words
+        out += _fill(tail + tail_extra.get(i, 0))
+    return out
+
+
+# --- 0xB064 v1 / subpacket 0x08 v7: the PHR control element -----------------------------------------
+
+# PHR CE byte 0x21: PH index 33 -> 33 - 23 = 10 dB (reserved bits zero, so Wireshark's own MAC decode is clean)
+UL_SAMPLE_PHR = dict(UL_SAMPLE, subheaders=[(26, None), (29, None), (1, 300), (31, None)], extra_bytes=b"\x21\x1f")
+
+
+# --- 0xB062 v1 / subpacket 0x06 v50 (lteMac.ts decodeB062) -----------------------------------------
+
+def rach_attempt_body(cell: int = 0, attempts: int = 1, result: int = 0, contention: int = 1, msg_mask: int = 7,
+                      preamble: int = 27, target_dbm: int = -110, ta: int = 18, ul_earfcn: int = 132622,
+                      sp_version: int = 50, size: int = 41, extra_subpackets=()) -> bytes:
+    """The subpacket size EXCLUDES the 4-byte subpacket header in this record."""
+    sp = _fill(1) + bytes([cell, attempts, result, contention, msg_mask, preamble]) + _fill(1)
+    sp += struct.pack("<h", target_dbm) + _fill(8) + struct.pack("<H", ta) + _fill(17) + struct.pack("<I", ul_earfcn)
+    assert len(sp) == 41
+    sp += _fill(size - 41)
+    subpackets = [struct.pack("<BBH", 6, sp_version, len(sp)) + sp]
+    for sp_id, ver, payload in extra_subpackets:
+        subpackets.append(struct.pack("<BBH", sp_id, ver, len(payload)) + payload)
+    return struct.pack("<BB", 1, len(subpackets)) + _fill(2) + b"".join(subpackets)
+
+
+# --- 0xB14E / 0xB14D v164 (csf.ts) -----------------------------------------------------------------
+
+def pusch_csf_body(sfn: int = 512, subframe: int = 3, carrier: int = 0, ri: int = 2, cqi_cw0: int = 9, cqi_cw1: int = 7,
+                   pmi: int = 6, tx_mode: int = 4, version: int = 164) -> bytes:
+    out = bytes([version]) + _word(4, (subframe, 0, 4), (sfn, 4, 10), (carrier, 14, 4), (ri - 1, 28, 2))
+    out += _word(4, (cqi_cw0, 7, 4), (cqi_cw1, 11, 4), (pmi, 24, 4)) + _word(1, (tx_mode, 0, 4)) + _fill(6)
+    return out
+
+
+def pucch_csf_body(report_type: int = 2, sfn: int = 512, subframe: int = 6, carrier: int = 0, ri: int = 1, cqi_cw0: int = 7,
+                   cqi_cw1: int = 0, pmi: int = 6, tx_mode: int = 4, version: int = 164) -> bytes:
+    out = bytes([version]) + _word(4, (subframe, 0, 4), (sfn, 4, 10), (carrier, 14, 4), (report_type, 26, 4)) + _fill(1)
+    out += _word(2, (cqi_cw0, 4, 4), (cqi_cw1, 8, 4), (pmi, 12, 4)) + _word(2, (tx_mode, 0, 4)) + _word(2, (ri - 1, 8, 2))
+    return out + _fill(2)
+
+
+# --- 0xB126 v163 (b126.ts) --------------------------------------------------------------------------
+
+def demapper_subframes():
+    """20 subframes, oldest first: SFN 500.0 .. 501.9, the last one with 25 PRB (10..34) at rank 2."""
+    rows = []
+    for k in range(20):
+        mask = ((1 << (k + 1)) - 1) << 5              # k + 1 PRBs from PRB 5
+        rows.append({"sfn": 500 + k // 10, "subframe": k % 10, "tx_antennas": 4, "rx_antennas": 2, "rank": 1, "prb_mask": mask})
+    rows[-1] = {"sfn": 501, "subframe": 9, "tx_antennas": 4, "rx_antennas": 4, "rank": 2, "prb_mask": ((1 << 25) - 1) << 10}
+    return rows
+
+
+def pdsch_demapper_body(subframes=None, version: int = 163) -> bytes:
+    subframes = demapper_subframes() if subframes is None else subframes
+    out = bytes([version]) + _fill(7)
+    for s in subframes:
+        bitmap = s["prb_mask"].to_bytes(7, "little")
+        sub = _word(2, (s["subframe"], 0, 4), (s["sfn"], 4, 10)) + _word(1, (s["tx_antennas"], 1, 3), (s["rx_antennas"] - 1, 4, 2))
+        sub += _fill(1) + _word(1, (s["rank"] - 1, 0, 2)) + _fill(3) + bitmap + _fill(9) + bitmap + _fill(17)
+        assert len(sub) == 48
+        out += sub
+    return out
+
+
+# --- 0xB12A v161 (b12a.ts) --------------------------------------------------------------------------
+
+def pcfich_elements():
+    """20 subframes: CFI 1 except 2 at k=3, 3 at k=4/5, nothing decoded at k=7 (raw 0)."""
+    rows = []
+    for k in range(20):
+        cfi = {3: 2, 4: 3, 5: 3}.get(k, 1)
+        decoded = 0 if k == 7 else 1
+        rows.append({"index": k, "subframe": k % 10, "decoded": decoded, "raw": 4 * cfi if decoded else 0})
+    return rows
+
+
+def pcfich_body(sfn: int = 520, elements=None, version: int = 161) -> bytes:
+    elements = pcfich_elements() if elements is None else elements
+    out = bytes([version]) + _fill(3) + _word(2, (sfn, 0, 10)) + _fill(10)
+    for e in elements:
+        out += struct.pack("<HBB", e["index"], e["decoded"], e["raw"]) + _word(2, (e["subframe"], 8, 4)) + _fill(2)
+    return out
+
+
+# --- 0xB16C v50 (b16c.ts) --------------------------------------------------------------------------
+
+DCI_SUBFRAMES = [{"sfn": 187, "subframe": 9, "grants": [(4, 1, 1)], "assignments": 0},
+                 {"sfn": 188, "subframe": 3, "grants": [(12, 20, 2), (30, 8, 3)], "assignments": 2},
+                 {"sfn": 188, "subframe": 5, "grants": [], "assignments": 1}]
+
+
+def dci_info_body(subframes=None, declared=None, truncate: int = 0) -> bytes:
+    """u8 50, count in bits 6-11 of the u16 at +1; per element a u32 then 16-byte grants and 8-byte assignments."""
+    subframes = DCI_SUBFRAMES if subframes is None else subframes
+    out = bytes([50]) + _word(2, (len(subframes) if declared is None else declared, 6, 6)) + _fill(1)
+    for s in subframes:
+        out += _word(4, (s["sfn"], 0, 10), (s["subframe"], 10, 4), (len(s["grants"]), 14, 2), (s["assignments"], 17, 3))
+        for start_rb, num_rbs, modulation in s["grants"]:
+            out += _word(16, (modulation, 32, 3), (start_rb, 43, 7), (num_rbs, 50, 7))
+        out += _fill(8 * s["assignments"])
+    return out[:len(out) - truncate] if truncate else out
+
+
+# --- 0x184C v0x11 (fedTxAgc.ts) ----------------------------------------------------------------------
+
+FED_CHAIN = {"chain": 0x10, "gain_state": 0x24, "power_dbm": 10.0, "power2_dbm": 12.6, "limits_dbm": (22.7, 23.0, 25.0)}
+FED_CHAIN_OFF = {"chain": 0x11, "gain_state": 0x30, "power_dbm": -70.0, "power2_dbm": -2.9, "limits_dbm": (22.7, 22.7, 22.7)}
+FED_BLOCKS = [{"frame": 203, "subframe": 9, "chains": [FED_CHAIN, FED_CHAIN_OFF]},
+              {"frame": 204, "subframe": 0, "chains": [dict(FED_CHAIN, power_dbm=15.5, gain_state=0x10)]}]
+
+
+def fed_tx_agc_body(blocks=None, version: int = 0x11, junk: bytes = b"") -> bytes:
+    """16-byte block headers (0x11, N, five zero bytes, u16 counter @7) and 120-byte chain sub-records."""
+    blocks = FED_BLOCKS if blocks is None else blocks
+    out = b""
+    for b in blocks:
+        header = bytes([version, len(blocks)]) + bytes(5) + _word(2, (b["subframe"], 4, 4), (b["frame"], 8, 8)) + _fill(7)
+        assert len(header) == 16
+        out += header
+        for c in b["chains"]:
+            sub = bytes([c["chain"], c["gain_state"]]) + _fill(2)
+            sub += struct.pack("<hhh", int(round(c["power_dbm"] * 10)), int(round(c["power2_dbm"] * 10)),
+                               int(round(c["power_dbm"] * 10)))
+            sub += _fill(56) + struct.pack("<HHH", *[int(round(x * 10)) for x in c["limits_dbm"]]) + _fill(48)
+            assert len(sub) == 120
+            out += sub
+    return out + junk
+
+
+# --- 0x1D0B v7 (modemClock.ts) -------------------------------------------------------------------------
+
+def modem_clock_body(ticks_1024hz: int = 44728, ticks_19m2: int = 11435733, sequence: int = 1707, version: int = 7,
+                     length: int = 370) -> bytes:
+    out = struct.pack("<III", version, ticks_1024hz, ticks_19m2 | 0xAB << 24) + _fill(84 - 12) + struct.pack("<I", sequence)
+    return out + _fill(length - 88)
 
 
 def pusch_tx_body(version: int = 23, grants=None, serving_cell_id: int = 101, dispatch_sfn_sf: int = 0x2008) -> bytes:

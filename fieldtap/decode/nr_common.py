@@ -19,9 +19,12 @@ from typing import Optional, Tuple
 from .records import DiagRecord
 
 DOC_NOTE = "layout from documentation; confirm on a hardware capture"
+# The layouts this repository's TypeScript / Swift engines derived and checked on the
+# iPhone 17 (Qualcomm M25) captures of 2026-09-21/22 (web/engine/src/phy/decoders/nr.ts).
+IPHONE_NOTE = "layout validated on the iPhone 17 (M25) captures of 2026-09-21/22"
 
 # The ranges a decoded value must sit in: TS 38.133 reporting ranges for the
-# measurements, TS 38.331 / 38.104 for the identities.
+# measurements, TS 38.331 / 38.104 / 38.214 for the identities and the grant.
 RANGES = {
     "rsrp": (-156.0, -31.0),     # SS-RSRP dBm
     "rsrq": (-43.0, 20.0),       # SS-RSRQ dB
@@ -37,6 +40,9 @@ RANGES = {
     "ssb_index": (0, 63),
     "harq_id": (0, 15),
     "tb_bytes": (0, 1 << 20),    # one NR transport block is below a megabyte
+    "mcs": (0, 31),              # TS 38.214 MCS index; 28-31 are retransmissions
+    "num_rb": (0, 275),          # TS 38.101 / 38.214: at most 273 PRBs in one carrier
+    "layers": (1, 8),
 }
 
 

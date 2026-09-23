@@ -10,7 +10,8 @@ from fieldtap import fixtures_nr_diag as fx
 from fieldtap import tshark as tshark_mod
 from fieldtap import wireshark_plugin
 from fieldtap.decode import Decoder, DiagRecord
-from fieldtap.decode.nr_common import DOC_NOTE
+from fieldtap.decode import nr_mac, nr_ml1, nr_state
+from fieldtap.decode.nr_common import DOC_NOTE, IPHONE_NOTE
 from fieldtap.diag.protocol import LogRecord
 from fieldtap.output.sinks import PcapngSink
 
@@ -44,6 +45,15 @@ def _records():
         (0xB872, fx.nr_ul_tb_body()[:20]),
         (0xB97F, fx.nr_search_meas_body(2, 7)[:100]),
         (0xB823, fx.nr_serving_cell_body(3, 0)[:30]),
+        # the iPhone 17 layouts: the plausibility gate, an empty record, the other version
+        (0xB887, fx.nr_pdsch_info_body(3, 13, [fx.pdsch_slot(pci=1010), fx.pdsch_slot(pci=80, crc_ok=False)])),
+        (0xB887, fx.nr_pdsch_info_body(3, 13, [])),
+        (0xB887, fx.nr_pdsch_info_body(3, 12)),
+        (0xB887, fx.nr_pdsch_info_body()[:30]),
+        (0xB888, fx.nr_pdsch_stats_body(3, 1, records=[])),
+        (0xB80C, fx.nr_mm5g_state_body(version=0x00030000, amf_region=7, amf_set=33, amf_pointer=2)),
+        (0xB97F, fx.nr_search_meas_body(3, 0, carriers=[fx.carrier(650000, 0xFFFF, [fx.cell(300, 1, -110.0, -17.5)], cc_id=255)])),
+        (0xB97F, fx.nr_search_meas_body(3, 0)[:60]),
     ]
     for code, body in extra:
         ts += 1 << 16
@@ -70,6 +80,10 @@ def outputs(tmp_path_factory):
 
 def _expected_note(rec: DiagRecord) -> str:
     return rec.note or rec.fields.get("layout_note", "")
+
+
+# The Python Info line per code; the Lua must print it character for character.
+SUMMARIES = {**nr_state.SUMMARIES, **nr_ml1.SUMMARIES, **nr_mac.SUMMARIES}
 
 
 def _summary_parts(rec: DiagRecord) -> list:
@@ -124,13 +138,19 @@ def test_every_record_has_the_python_outcome_and_a_summary(outputs):
         assert int(version) == rec.version, number
         assert decoded == rec.decoded, (number, info)
         assert note == _expected_note(rec), (number, note)
-        assert DOC_NOTE in note
-        for part in _summary_parts(rec):
-            assert part in info, (number, part, info)
+        assert DOC_NOTE in note or IPHONE_NOTE in note or "not implemented" in note, (number, note)
+        if rec.log_code in SUMMARIES:
+            # tshark's stdout is not always UTF-8 on Windows: compare what follows the "·"
+            assert info.partition("·")[2].strip() == SUMMARIES[rec.log_code](rec.fields), (number, info)
+        else:
+            for part in _summary_parts(rec):
+                assert part in info, (number, part, info)
         seen.add((rec.log_code, rec.decoded))
     assert {(0xB822, "fields"), (0xB823, "fields"), (0xB80C, "fields"), (0xB975, "fields"), (0xB97F, "fields"),
             (0xB97F, "partial"), (0xB888, "fields"), (0xB883, "partial"), (0xB872, "fields"), (0xB872, "partial"),
-            (0xB823, "partial"), (0xB822, "partial"), (0xB975, "partial"), (0xB888, "partial")} <= seen
+            (0xB823, "partial"), (0xB822, "partial"), (0xB975, "partial"), (0xB888, "partial"),
+            (0xB887, "fields"), (0xB887, "partial")} <= seen
+    assert [r.decoded for r in diag].count("raw") >= 4      # the misfits stay bare, on both sides
 
 
 def _top(name):
@@ -156,6 +176,13 @@ FIELDS = {
     "fieldtap.nr.amf_region_id": _top("amf_region_id"), "fieldtap.nr.amf_set_id": _top("amf_set_id"),
     "fieldtap.nr.amf_pointer": _top("amf_pointer"), "fieldtap.nr.tmsi_5g": _top("tmsi_5g"),
     "fieldtap.nr.update_status": _top("update_status"),
+    "fieldtap.nr.guti_assigned": lambda r: [] if "guti_assigned" not in r.fields else [int(r.fields["guti_assigned"])],
+    "fieldtap.nr.tbs_bytes": _top("tbs_bytes"), "fieldtap.nr.crc_fail": _top("crc_fail"),
+    "fieldtap.nr.pdsch_info.frame": _rows("slots", "frame"), "fieldtap.nr.pdsch_info.slot": _rows("slots", "slot"),
+    "fieldtap.nr.pdsch_info.pci": _rows("slots", "pci"), "fieldtap.nr.pdsch_info.tbs_bytes": _rows("slots", "tbs_bytes"),
+    "fieldtap.nr.pdsch_info.mcs": _rows("slots", "mcs"), "fieldtap.nr.pdsch_info.num_rb": _rows("slots", "num_rb"),
+    "fieldtap.nr.pdsch_info.harq_id": _rows("slots", "harq_id"), "fieldtap.nr.pdsch_info.layers": _rows("slots", "layers"),
+    "fieldtap.nr.pdsch_info.crc_pass": lambda r: [int(row["crc_pass"]) for row in dict(r.sections).get("slots", [])],
     "fieldtap.nr.rsrp": _top("rsrp"), "fieldtap.nr.rsrq": _top("rsrq"),
     "fieldtap.nr.num_layers": _top("num_layers"), "fieldtap.nr.num_cells": _top("num_cells"),
     "fieldtap.nr.num_beams": _top("num_beams"), "fieldtap.nr.ssb_periodicity": _top("ssb_periodicity"),

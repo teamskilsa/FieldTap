@@ -19,6 +19,25 @@ Two fields are interpreted beyond what the source states, each guarded by a
 plausibility check: "Current SFN SF" in 0xB139 is read as SFN << 4 | subframe (the
 packing every other Qualcomm SFN/SF word uses), and the 10-bit PUSCH Tx power is read
 as two's complement dBm (signedness unconfirmed).
+
+The iPhone 17 (Qualcomm M25) logs 0xB173 v50 and 0xB139 v162, neither documented.
+Both layouts were derived and validated on the captures of 2026-09-21/22 by this
+repository's TypeScript engine (web/engine/src/phy/decoders/b173.ts, b139.ts) and
+are ported here field for field:
+
+0xB173 v50: 4-byte header (version, record count, 2 reserved); 40-byte records:
+u16 @0 = SFN << 4 | subframe, u8 layers @2, u8 TB count @3, u8 carrier @4 (& 7);
+TB slots @12 and @24, 12 bytes each: u8 = HARQ 4b | RV 2b | NDI 1b | CRC 1b,
+u16 @1 = RNTI type 4b | TB index bit 4, u16 TBS bytes @4, u8 MCS @6, u8 nRB @7,
+u8 Qm @8 (2/4/6/8; 0 when the slot is unused). TBS sizes match TS 36.213.
+
+0xB139 v162: the same 8-byte header; 100-byte records: u32 @0 = TTI (low 16 bits,
+SFN * 10 + subframe) | flags (carrier 2b @16, retx index 5b @23); u32 @4: start RB
+bits 1-7, nRB bits 15-21; u16 TBS bytes @8; u16 code rate x1024 @10; byte @36
+bits 2-4 modulation (1 QPSK, 2 16QAM, 3 64QAM, 4 256QAM); byte @46 required PUSCH
+power in 0.25 dB steps, dBm = raw / 4 - 1.5 (offset from 442 TTI-matched power
+headroom reports, assuming Pcmax,c = 23 dBm, so the absolute value is good to
+about 1.5 dB; before Pcmax capping, so it may exceed 23 dBm).
 """
 
 from __future__ import annotations
@@ -30,12 +49,16 @@ from ..diag.protocol import LogRecord
 from .records import DiagRecord
 
 DOC_NOTE = "layout from documentation; confirm on a hardware capture"
+HW_NOTE = "layout validated on the iPhone 17 (M25) captures of 2026-09-21/22"
 
 RNTI_NAMES = {0: "C-RNTI", 1: "SPS C-RNTI", 2: "P-RNTI", 3: "RA-RNTI", 4: "Temp C-RNTI", 5: "SI-RNTI"}
 # v5 derives modulation from the MCS index; v24+ carry a modulation byte with these codes
 MODULATION_FROM_MCS = ((17, "64QAM"), (10, "16QAM"), (0, "QPSK"))
 MODULATION_V24 = {2: "QPSK", 4: "16QAM", 6: "64QAM", 8: "256QAM"}
 PUSCH_MOD_ORDER = {0: "BPSK", 1: "QPSK", 2: "16QAM", 3: "64QAM"}
+# v162 modulation codes and the Qm they stand for
+PUSCH_MOD_V162 = {1: "QPSK", 2: "16QAM", 3: "64QAM", 4: "256QAM"}
+PUSCH_QM_V162 = {1: 2, 2: 4, 3: 6, 4: 8}
 
 # version -> (P1 length, TB slot length, P2 length, has modulation byte, has HSIC bits, has QED byte)
 _PDSCH_LAYOUT = {
@@ -55,14 +78,20 @@ def _record(rec, info, version, fields, sections, decoded, notes, default_name):
 
 # --- 0xB173 LTE PDSCH Stat Indication -----------------------------------------------------
 
+_PDSCH_V50_VERSION = 50
+_PDSCH_V50_RECORD = 40
+
+
 def decode_pdsch_stat(rec: LogRecord, info=None) -> Optional[DiagRecord]:
-    """0xB173, versions 5, 16, 24, 32 and 36."""
+    """0xB173, versions 5, 16, 24, 32 and 36 from documentation, v50 from the iPhone 17."""
     body = rec.body
     if len(body) < 4:
         return None
     version = body[0]
     num_records = body[1]
     fields = {"version": version, "num_records": num_records}
+    if version == _PDSCH_V50_VERSION:
+        return _decode_pdsch_stat_v50(rec, info, fields)
     notes = [DOC_NOTE]
     layout = _PDSCH_LAYOUT.get(version)
     if layout is None:
@@ -148,6 +177,65 @@ def _pdsch_tb(body: bytes, p: int, version: int, has_mod: bool, has_qed: bool) -
     return tb
 
 
+def _decode_pdsch_stat_v50(rec: LogRecord, info, fields: dict) -> Optional[DiagRecord]:
+    """v50: fixed 40-byte records with two 12-byte TB slots (web/engine/src/phy/decoders/b173.ts)."""
+    body = rec.body
+    num_records = fields["num_records"]
+    if len(body) < 4 + num_records * _PDSCH_V50_RECORD:
+        return None
+    notes = [HW_NOTE]
+    bad = []
+    records, tbs = [], []
+    for i in range(num_records):
+        r = 4 + _PDSCH_V50_RECORD * i
+        sf_word = struct.unpack_from("<H", body, r)[0]
+        num_tb = body[r + 3]
+        row = {"record": i, "subframe": sf_word & 0xF, "sfn": (sf_word >> 4) & 0xFFF, "num_layers": body[r + 2],
+               "num_tb": num_tb, "serving_cell_index": body[r + 4] & 7}
+        for key, limit in (("subframe", 9), ("sfn", 1023)):
+            if row[key] > limit:
+                bad.append("record%d.%s=%d" % (i, key, row[key]))
+                row[key] = None
+        if num_tb > 2:
+            bad.append("record%d.num_tb=%d" % (i, num_tb))
+            num_tb = 2
+        for t in range(num_tb):
+            p = r + 12 + 12 * t
+            harq_byte = body[p]
+            rnti_word = struct.unpack_from("<H", body, p + 1)[0]
+            qm = body[p + 8]
+            tb = {"record": i, "tb": t, "harq_id": harq_byte & 0xF, "rv": (harq_byte >> 4) & 3,
+                  "ndi": (harq_byte >> 6) & 1, "crc_pass": (harq_byte >> 7) & 1, "rnti_type": rnti_word & 0xF,
+                  "tb_index": (rnti_word >> 4) & 1, "tb_size": struct.unpack_from("<H", body, p + 4)[0],
+                  "mcs": body[p + 6], "num_rbs": body[p + 7], "qm": qm, "modulation": MODULATION_V24.get(qm)}
+            tb["rnti_type_name"] = RNTI_NAMES.get(tb["rnti_type"], "unknown")
+            for key, limit in (("mcs", 31), ("num_rbs", 110)):
+                if tb[key] > limit:
+                    bad.append("record%d.tb%d.%s=%d" % (i, t, key, tb[key]))
+                    tb[key] = None
+            if tb["rnti_type"] not in RNTI_NAMES:
+                bad.append("record%d.tb%d.rnti_type=%d" % (i, t, tb["rnti_type"]))
+            if qm not in MODULATION_V24 and qm != 0:
+                bad.append("record%d.tb%d.qm=%d" % (i, t, qm))
+            tbs.append(tb)
+        records.append(row)
+    if tbs:
+        first = tbs[0]
+        fields.update({"sfn": records[0]["sfn"], "subframe": records[0]["subframe"],
+                       "tbs_bytes": sum(t["tb_size"] for t in tbs), "num_tb": len(tbs),
+                       "harq_id": first["harq_id"], "rnti_type": first["rnti_type"],
+                       "rnti_type_name": first["rnti_type_name"], "mcs": first["mcs"],
+                       "modulation": first["modulation"], "num_rbs": first["num_rbs"],
+                       "crc_pass": sum(1 for t in tbs if t["crc_pass"] == 1),
+                       "crc_fail": sum(1 for t in tbs if t["crc_pass"] == 0)})
+    decoded = "fields"
+    if bad:
+        notes.append("implausible: " + ", ".join(bad))
+        decoded = "partial"
+    return _record(rec, info, _PDSCH_V50_VERSION, fields, [("records", records), ("transport_blocks", tbs)], decoded,
+                   notes, "LTE PDSCH Stat Indication")
+
+
 def pdsch_stat_summary(fields: dict) -> str:
     """The Info-column line; wireshark/fieldtap_lte.lua prints the same."""
     if "tbs_bytes" not in fields:
@@ -161,6 +249,8 @@ def pdsch_stat_summary(fields: dict) -> str:
 # --- 0xB139 LTE PHY PUSCH Tx Report ------------------------------------------------------
 
 _PUSCH_RECORD_LEN = {23: 48, 24: 48, 26: 52}
+_PUSCH_V162_VERSION = 162
+_PUSCH_V162_RECORD = 100
 
 
 def _signed(raw: int, bits: int) -> int:
@@ -176,6 +266,8 @@ def decode_pusch_tx(rec: LogRecord, info=None) -> Optional[DiagRecord]:
     word = struct.unpack_from("<H", body, 1)[0]
     fields = {"version": version, "serving_cell_id": word & 0x1FF, "num_records": (word >> 9) & 0x1F,
               "dispatch_sfn_sf_raw": struct.unpack_from("<H", body, 4)[0]}
+    if version == _PUSCH_V162_VERSION:
+        return _decode_pusch_tx_v162(rec, info, fields)
     notes = [DOC_NOTE]
     rec_len = _PUSCH_RECORD_LEN.get(version)
     if rec_len is None:
@@ -231,12 +323,59 @@ def decode_pusch_tx(rec: LogRecord, info=None) -> Optional[DiagRecord]:
     return _record(rec, info, version, fields, [("grants", grants)], decoded, notes, "LTE PHY PUSCH Tx Report")
 
 
+def _decode_pusch_tx_v162(rec: LogRecord, info, fields: dict) -> Optional[DiagRecord]:
+    """v162: 100-byte records with TTI, RB allocation, TBS, code rate, modulation and the
+    required PUSCH power (web/engine/src/phy/decoders/b139.ts)."""
+    body = rec.body
+    if len(body) < 8 + fields["num_records"] * _PUSCH_V162_RECORD:
+        return None
+    notes = [HW_NOTE]
+    bad = []
+    grants = []
+    for i in range(fields["num_records"]):
+        r = 8 + _PUSCH_V162_RECORD * i
+        w0, w1, tb_size, code_raw = struct.unpack_from("<IIHH", body, r)
+        flags = w0 >> 16
+        tti = w0 & 0xFFFF
+        code = (body[r + 36] >> 2) & 7
+        power_raw = body[r + 46]
+        row = {"grant": i, "tti": tti, "sfn": tti // 10, "subframe": tti % 10, "carrier": flags & 3,
+               "retx_index": (flags >> 7) & 0x1F, "start_rb": (w1 >> 1) & 0x7F, "num_rbs": (w1 >> 15) & 0x7F,
+               "tb_size": tb_size, "coding_rate": code_raw / 1024.0, "modulation_code": code,
+               "modulation": PUSCH_MOD_V162.get(code), "mod_order": PUSCH_QM_V162.get(code),
+               "power_raw": power_raw, "required_power_dbm": power_raw / 4.0 - 1.5}
+        for key, low, high in (("sfn", 0, 1023), ("num_rbs", 0, 110), ("coding_rate", 0.0, 2.0)):
+            if not low <= row[key] <= high:
+                bad.append("grant%d.%s=%s" % (i, key, row[key]))
+                row[key] = None
+        if row["sfn"] is None:
+            row["subframe"] = None
+        grants.append(row)
+    if grants:
+        first = grants[0]
+        fields.update({"tti": first["tti"], "sfn": first["sfn"], "subframe": first["subframe"],
+                       "tbs_bytes": sum(g["tb_size"] for g in grants), "required_power_dbm": first["required_power_dbm"],
+                       "modulation": first["modulation"], "mod_order": first["mod_order"],
+                       "coding_rate": first["coding_rate"], "num_rbs": first["num_rbs"]})
+    decoded = "fields"
+    if bad:
+        notes.append("implausible: " + ", ".join(bad))
+        decoded = "partial"
+    return _record(rec, info, _PUSCH_V162_VERSION, fields, [("grants", grants)], decoded, notes, "LTE PHY PUSCH Tx Report")
+
+
 def pusch_tx_summary(fields: dict) -> str:
     """The Info-column line; wireshark/fieldtap_lte.lua prints the same."""
     if "tbs_bytes" not in fields:
         return "v%d, %d records (partial)" % (fields.get("version", 0), fields.get("num_records", 0))
-    power = "%d dBm" % fields["tx_power_dbm"] if fields.get("tx_power_dbm") is not None else "n/a"
-    return "%d grants %d bytes %s Tx %s" % (fields["num_records"], fields["tbs_bytes"], fields["modulation"], power)
+    if fields.get("required_power_dbm") is not None:
+        power = "%.2f dBm" % fields["required_power_dbm"]
+    elif fields.get("tx_power_dbm") is not None:
+        power = "%d dBm" % fields["tx_power_dbm"]
+    else:
+        power = "n/a"
+    return "%d grants %d bytes %s Tx %s" % (fields["num_records"], fields["tbs_bytes"], fields["modulation"] or "n/a",
+                                           power)
 
 
 DECODERS = {"lte_pdsch_stat": decode_pdsch_stat, "lte_pusch_tx": decode_pusch_tx}

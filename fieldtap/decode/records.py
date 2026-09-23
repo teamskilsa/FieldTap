@@ -262,7 +262,7 @@ _DECODERS: dict = {}
 # Modules that contribute record decoders. Each exposes DECODERS = {key: parser}, where a
 # parser is parser(rec, info) -> DecodedMessage | CellInfo | DiagRecord | None. A module that
 # is not there yet is skipped, so the register can name a decoder before it exists.
-_DECODER_MODULES = ("lte_ml1", "lte_mac", "lte_phy", "nr_cell", "nr_ml1", "nr_state", "nr_mac")
+_DECODER_MODULES = ("lte_ml1", "lte_mac", "lte_phy", "lte_ll1", "rf", "nr_cell", "nr_ml1", "nr_state", "nr_mac")
 
 
 def decoders() -> dict:

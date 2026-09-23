@@ -1,5 +1,5 @@
 """Synthetic NR diag records for the NR record decoders (0xB822, 0xB823, 0xB80C,
-0xB975, 0xB97F, 0xB888, 0xB883, 0xB872).
+0xB975, 0xB97F, 0xB887, 0xB888, 0xB883, 0xB872).
 
 The builders pack every layout explicitly and independently of the decoders'
 tables, so an accidental edit to one side shows up as a failure. The values are
@@ -7,7 +7,9 @@ the ones a real OnePlus 10 Pro logged on a commercial n77 cell (see
 android/diag/src/test/resources/oneplus-5g-registration.md): PCI 417, NR-ARFCN
 647328, PLMN 311-480, TAC 360102, band n77, SS-RSRP around -90 dBm. What these
 records cannot prove is that the layouts match real modems; only hardware
-captures do that.
+captures do that: the iPhone 17 (M25) layouts (0xB887 3.13, 0xB888 3.1, 0xB97F
+3.0, 0xB80C 3.0) were validated on the captures of 2026-09-21/22
+(tests/test_decode_nr_real.py, run with FT_REAL_QMDL).
 """
 
 from __future__ import annotations
@@ -88,11 +90,17 @@ def plmn_octets(mcc: int, mnc: int, mnc_digits: int = 3) -> bytes:
 
 def nr_mm5g_state_body(state: int = 3, substate: int = 0, mcc: int = MCC, mnc: int = MNC, mnc_digits: int = 3,
                        amf_region: int = 1, amf_set: int = 1, amf_pointer: int = 0,
-                       tmsi: int = 0x0CC6E898, update_status: int = 0, tac: int = TAC) -> bytes:
+                       tmsi: int = 0x0CC6E898, update_status: int = 0, tac: int = TAC,
+                       version: int = 1, guti_none: bool = False, trailing: bytes = b"") -> bytes:
+    """Version 1, or 3.0 (version=0x00030000: the same body, as the iPhone 17 writes it, plus
+    any trailing bytes). guti_none: the 12 GUTI bytes all 0xFF, as before a registration."""
     plmn = plmn_octets(mcc, mnc, mnc_digits)
-    return (struct.pack("<I", 1) + bytes([state]) + struct.pack("<H", substate) + plmn + bytes([2]) + plmn
-            + bytes([amf_region]) + struct.pack(">H", amf_set) + bytes([amf_pointer]) + struct.pack(">I", tmsi)
-            + bytes([update_status]) + tac.to_bytes(3, "big"))
+    guti = (bytes([2]) + plmn + bytes([amf_region]) + struct.pack(">H", amf_set) + bytes([amf_pointer])
+            + struct.pack(">I", tmsi))
+    if guti_none:
+        guti = b"\xff" * 12
+    return (struct.pack("<I", version) + bytes([state]) + struct.pack("<H", substate) + plmn + guti
+            + bytes([update_status]) + tac.to_bytes(3, "big") + trailing)
 
 
 # --- 0xB975 NR ML1 Serving Cell Beam Management ------------------------------------------------
@@ -213,14 +221,18 @@ def _mac_header(major: int, minor: int, num_records: int, flags=(0, 1, 0, 0, 1, 
 
 
 def nr_pdsch_stats_body(major: int = 3, minor: int = 1, records=None, header_len: int = None,
-                        flags=(0, 1, 0, 0, 1, 1), bmask: int = 0x0003) -> bytes:
+                        flags=(0, 1, 0, 0, 1, 1), bmask: int = 0x0003, counter: int = 0x1001E5D0) -> bytes:
     """2.2: 28-byte header (12 reserved bytes after the count), 72-byte records.
-    3.1: 16-byte header, 76-byte records with an extra u32 after the carrier id."""
+    3.1 (the iPhone 17): version, u32 1, a running u32, u8 record count @12, 3 zero
+    bytes; 76-byte records with an extra u32 after the carrier id."""
     records = [pdsch_record()] if records is None else records
     v31 = (major, minor) == (3, 1)
     if header_len is None:
         header_len = 16 if v31 else 28
-    out = bytearray(_mac_header(major, minor, len(records), flags, bmask))
+    if v31:
+        out = bytearray(_version(major, minor) + struct.pack("<IIB3x", 1, counter, len(records)))
+    else:
+        out = bytearray(_mac_header(major, minor, len(records), flags, bmask))
     out += bytes(header_len - 16)
     for r in records:
         out += struct.pack("<I", r["carrier_id"])
@@ -229,6 +241,42 @@ def nr_pdsch_stats_body(major: int = 3, minor: int = 1, records=None, header_len
         out += struct.pack("<7I", r["slots"], r["decodes"], r["crc_pass"], r["crc_fail"], r["retx"],
                            r["ack_as_nack"], r["harq_failure"])
         out += struct.pack("<5Q", r["pass_bytes"], r["fail_bytes"], r["tb_bytes"], r["padding_bytes"], r["retx_bytes"])
+    return bytes(out)
+
+
+# --- 0xB887 NR MAC PDSCH Info ------------------------------------------------------------------
+
+def pdsch_slot(frame: int = 212, slot: int = 7, pci: int = PCI, tbs: int = 6151, mcs: int = 17, n_rb: int = 106,
+               harq: int = 3, layers: int = 2, crc_ok: bool = True) -> dict:
+    return dict(frame=frame, slot=slot, pci=pci, tbs=tbs, mcs=mcs, n_rb=n_rb, harq=harq, layers=layers, crc_ok=crc_ok)
+
+
+def nr_pdsch_info_body(major: int = 3, minor: int = 13, slots=None, fill: int = 0) -> bytes:
+    """8-byte header (u8 record count @7); 44-byte records: u32 @8 frame bits 5-14, slot bits
+    15-19; u16 @12 PCI in the low 10 bits; u32 @16 TBS bytes bits 5-22, MCS bits 26-30; u32 @20
+    nRB bits 0-7, HARQ bits 11-14, layers-1 bits 29-30; byte @24 bit 0 CRC pass. `fill` is
+    what every bit the decoder must not read is set to (0 or 1), so a misread shows up."""
+    slots = [pdsch_slot()] if slots is None else slots
+    mask = 0xFFFFFFFF if fill else 0
+
+    def word(*parts):
+        # parts: (value, shift, width); the other bits take `fill`
+        w, used = 0, 0
+        for value, shift, width in parts:
+            assert 0 <= value < (1 << width), (value, width)
+            w |= value << shift
+            used |= ((1 << width) - 1) << shift
+        return w | (mask & ~used & 0xFFFFFFFF)
+
+    out = bytearray(_version(major, minor) + bytes([fill * 0xFF] * 3) + bytes([len(slots)]))
+    for s in slots:
+        rec = bytearray(bytes([fill * 0xFF]) * 44)
+        struct.pack_into("<I", rec, 8, word((s["frame"], 5, 10), (s["slot"], 15, 5)))
+        struct.pack_into("<H", rec, 12, s["pci"] | (mask & 0xFC00))
+        struct.pack_into("<I", rec, 16, word((s["tbs"], 5, 18), (s["mcs"], 26, 5)))
+        struct.pack_into("<I", rec, 20, word((s["n_rb"], 0, 8), (s["harq"], 11, 4), (s["layers"] - 1, 29, 2)))
+        rec[24] = (fill * 0xFE) | (1 if s["crc_ok"] else 0)
+        out += rec
     return bytes(out)
 
 
@@ -303,5 +351,11 @@ def build_nr_corpus() -> list:
         (0xB888, ts(), nr_pdsch_stats_body(2, 2)),
         (0xB883, ts(), nr_ul_sched_body()),
         (0xB872, ts(), nr_ul_tb_body()),
+        # the iPhone 17 (M25) versions
+        (0xB887, ts(), nr_pdsch_info_body(3, 13, [pdsch_slot(), pdsch_slot(slot=8, mcs=28, crc_ok=False)])),
+        (0xB80C, ts(), nr_mm5g_state_body(state=1, substate=2, mcc=310, mnc=410, version=0x00030000,
+                                          guti_none=True, update_status=1, tac=0, trailing=b"\x00")),
+        (0xB883, ts(), _version(3, 26) + bytes(range(36))),
+        (0xB872, ts(), _version(3, 17) + bytes(range(60))),
     ]
     return records

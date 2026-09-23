@@ -9,8 +9,11 @@
 --
 -- Every value is held to the same plausibility ranges as the Python side; an implausible
 -- one is left out, the record is marked "partial" and fieldtap.nr.note names the field.
--- Layouts come from documentation (docs/research/qualcomm-measurement-log-layouts.md);
--- confirm on a hardware capture.
+-- Layouts come from documentation (docs/research/qualcomm-measurement-log-layouts.md) or,
+-- for the versions the iPhone 17 (M25) logs (0xB887 3.13, 0xB888 3.1, 0xB97F 3.0, 0xB80C
+-- 3.0), from this repository's TypeScript engine (web/engine/src/phy/decoders/nr.ts),
+-- validated on the captures of 2026-09-21/22. Each decoder's summary string is the one
+-- the Python module's summary_* function builds, character for character.
 --
 -- Load-order independent: works whether this file or fieldtap.lua loads first.
 --
@@ -65,6 +68,7 @@ def("amf_set_id", "uint16", "AMF set ID")
 def("amf_pointer", "uint8", "AMF pointer")
 def("tmsi_5g", "uint32", "5G-TMSI", base.HEX)
 def("update_status", "string", "Update status")
+def("guti_assigned", "uint8", "GUTI assigned")
 -- measurements
 def("rsrp", "double", "SS-RSRP (dBm)")
 def("rsrq", "double", "SS-RSRQ (dB)")
@@ -129,6 +133,17 @@ def("pdsch.tb_bytes", "uint64", "TB bytes")
 def("pdsch.padding_bytes", "uint64", "Padding bytes")
 def("pdsch.retx_bytes", "uint64", "Retransmitted bytes")
 def("pdsch.bler_pct", "double", "BLER (%)")
+def("tbs_bytes", "uint32", "TBS bytes (sum)")
+def("crc_fail", "uint16", "CRC failures")
+def("pdsch_info.frame", "uint16", "Frame")
+def("pdsch_info.slot", "uint8", "Slot")
+def("pdsch_info.pci", "uint16", "PCI")
+def("pdsch_info.tbs_bytes", "uint32", "TBS bytes")
+def("pdsch_info.mcs", "uint8", "MCS")
+def("pdsch_info.num_rb", "uint16", "Resource blocks")
+def("pdsch_info.harq_id", "uint8", "HARQ id")
+def("pdsch_info.layers", "uint8", "Layers")
+def("pdsch_info.crc_pass", "uint8", "CRC pass")
 def("slot", "uint8", "Slot")
 def("numerology", "uint8", "Numerology")
 def("carrier_rnti_raw", "uint8", "Carrier id / RNTI type (raw)", base.HEX)
@@ -162,11 +177,14 @@ proto_nr.fields = fields
 -- shared machinery (mirrors fieldtap/decode/nr_common.py)
 
 local DOC_NOTE = "layout from documentation; confirm on a hardware capture"
+local IPHONE_NOTE = "layout validated on the iPhone 17 (M25) captures of 2026-09-21/22"
 local RANGES = {
   rsrp = { -156, -31 }, rsrq = { -43, 20 }, sinr = { -23, 40 }, pci = { 0, 1007 }, arfcn = { 0, 3279165 },
   tac = { 0, 0xFFFFFF }, sfn = { 0, 1023 }, band = { 1, 1024 }, numerology = { 0, 4 }, slot = { 0, 159 },
-  ssb_index = { 0, 63 }, harq_id = { 0, 15 }, tb_bytes = { 0, 2 ^ 20 },
+  ssb_index = { 0, 63 }, harq_id = { 0, 15 }, tb_bytes = { 0, 2 ^ 20 }, mcs = { 0, 31 }, num_rb = { 0, 275 },
+  layers = { 1, 8 },
 }
+local MAX_BEAMS = 64
 local NR_BW_MHZ = { [5] = 1, [10] = 1, [15] = 1, [20] = 1, [25] = 1, [30] = 1, [35] = 1, [40] = 1, [45] = 1,
                     [50] = 1, [60] = 1, [70] = 1, [80] = 1, [90] = 1, [100] = 1, [200] = 1, [400] = 1 }
 local SCS_KHZ = { [0] = 15, [1] = 30, [2] = 60, [3] = 120 }
@@ -176,6 +194,10 @@ local function u8(b, off) return b(off, 1):uint() end
 local function u16(b, off) return b(off, 2):le_uint() end
 local function u32(b, off) return b(off, 4):le_uint() end
 local function fmt(v, unit) return FieldTap.helpers.fmt(v, unit, 1) end
+-- a headline number for the Info line: "n/a" when it failed plausibility (Python _n)
+local function n(v) if v == nil then return "n/a" end return string.format("%d", v) end
+-- `width` bits of the u32 `w` from bit `shift` (nr.ts bits)
+local function bits(w, shift, width) return math.floor(w / 2 ^ shift) % (2 ^ width) end
 
 -- One decode's bookkeeping: what failed plausibility, the notes, the outcome.
 local function state()
@@ -192,13 +214,15 @@ local function add(t, name, range, value)
   if value ~= nil then t:add(F[name], range, value) end
 end
 local function add64(t, name, range) t:add_le(F[name], range) end
-local function finish(S, t, body, ctx, extra_notes)
+-- `source` is the closing note: DOC_NOTE (default), IPHONE_NOTE, or false for none.
+local function finish(S, t, body, ctx, extra_notes, source)
   if #S.bad > 0 then
     S.decoded = "partial"
     table.insert(S.notes, 1, "implausible: " .. table.concat(S.bad, ", "))
   end
-  for _, n in ipairs(extra_notes or {}) do S.notes[#S.notes + 1] = n end
-  S.notes[#S.notes + 1] = DOC_NOTE
+  for _, note in ipairs(extra_notes or {}) do S.notes[#S.notes + 1] = note end
+  if source == nil then source = DOC_NOTE end
+  if source then S.notes[#S.notes + 1] = source end
   t:add(F.decoded, body(0, 0), S.decoded)
   t:add(F.note, body(0, 0), table.concat(S.notes, "; "))
   if S.decoded == "partial" then t:append_text(" (partial)") end
@@ -338,30 +362,47 @@ local MM5G_STATE = { [1] = "deregistered", [2] = "registered_initiated", [3] = "
 local DEREG_SUBSTATE = { [0] = "normal_service", [1] = "plmn_search", [2] = "no_cell_available", [5] = "limited_service" }
 local UPDATE_STATUS = { [0] = "updated", [1] = "not_updated" }
 
+-- Version 1 (documented) and 3.0 (the iPhone 17: the same body, trailing bytes not read). The
+-- 5G-TMSI is a subscriber identifier: the 3.0 decode reports only whether a GUTI is assigned
+-- and, when it is, its network part.
 D[0xB80C] = function(body, pinfo, tree, ctx)
   if body:len() < 26 then return nil end
   local version = u32(body, 0)
   local st = u8(body, 4)
-  if version ~= 1 or MM5G_STATE[st] == nil then return nil end
+  local v30 = version == 0x00030000
+  if (version ~= 1 and not v30) or MM5G_STATE[st] == nil then return nil end
   local t = tree:add(proto_nr, body())
   local S = state()
   t:add_le(ctx.version_field, body(0, 4))
-  t:add(F.version, body(0, 4), "1")
+  t:add(F.version, body(0, 4), v30 and "3.0" or "1")
   local sub = u16(body, 5)
   t:add(F.state, body(4, 1), MM5G_STATE[st])
   t:add(F.substate, body(5, 2), DEREG_SUBSTATE[sub] or string.format("substate_%d", sub))
   local plmn = decode_plmn(body, 7)
   t:add(F.plmn, body(7, 3), plmn)
-  t:add(F.guti_plmn, body(11, 3), decode_plmn(body, 11))
-  t:add(F.amf_region_id, body(14, 1), u8(body, 14))
-  t:add(F.amf_set_id, body(15, 2), body(15, 2):uint())
-  t:add(F.amf_pointer, body(17, 1), u8(body, 17))
-  t:add(F.tmsi_5g, body(18, 4), body(18, 4):uint())
+  local assigned = true
+  if v30 then
+    assigned = body(10, 12):bytes():tohex() ~= string.rep("FF", 12)
+    t:add(F.guti_assigned, body(10, 12), assigned and 1 or 0)
+  end
+  if assigned then
+    t:add(F.guti_plmn, body(11, 3), decode_plmn(body, 11))
+    t:add(F.amf_region_id, body(14, 1), u8(body, 14))
+    t:add(F.amf_set_id, body(15, 2), body(15, 2):uint())
+    t:add(F.amf_pointer, body(17, 1), u8(body, 17))
+  end
+  if not v30 then t:add(F.tmsi_5g, body(18, 4), body(18, 4):uint()) end
   local upd = u8(body, 22)
   t:add(F.update_status, body(22, 1), UPDATE_STATUS[upd] or string.format("status_%d", upd))
   local tac = body(23, 3):uint()
   t:add(F.tac, body(23, 3), tac)
-  finish(S, t, body, ctx)
+  if v30 then
+    local notes = { "5G-TMSI not reported" }
+    if body:len() > 26 then notes[#notes + 1] = string.format("%d trailing byte(s) not read", body:len() - 26) end
+    finish(S, t, body, ctx, notes, IPHONE_NOTE)
+  else
+    finish(S, t, body, ctx)
+  end
   return string.format("%s PLMN %s TAC %d", MM5G_STATE[st], plmn, tac)
 end
 
@@ -409,23 +450,25 @@ D[0xB975] = function(body, pinfo, tree, ctx)
   end
   if beam_len ~= 12 then notes[#notes + 1] = string.format("%d-byte beam records", beam_len) end
   finish(S, t, body, ctx, notes)
-  return string.format("PCI %s SS-RSRP %s SS-RSRQ %s %d beams", tostring(pci), fmt(rsrp, "dBm"), fmt(rsrq, "dB"),
+  return string.format("PCI %s SS-RSRP %s SS-RSRQ %s %d beams", n(pci), fmt(rsrp, "dBm"), fmt(rsrq, "dB"),
                        num_beams)
 end
 
 -- ---------------------------------------------------------------------------------------------
 -- 0xB97F NR ML1 Searcher Measurement Database Update Ext (nr_ml1.decode_search_meas)
 
-local function cand(hdr, count_off, carrier, beam, scale, shape, full)
+-- beams: "full" (the 44-byte record read), "index" (skipped by size, SSB index kept) or
+-- "count" (skipped by size, counted only: the 3.0 layout, as nr.ts reads it)
+local function cand(hdr, count_off, carrier, beam, scale, shape, beams)
   return { header = hdr, count_off = count_off, carrier = carrier, beam = beam, scale = scale,
-           shape = shape or "v2", full = full ~= false }
+           shape = shape or "v2", beams = beams or "full" }
 end
 local C26 = cand(8, 4, 32, 44, "raw")
 local C27 = cand(16, 4, 32, 44, "q7")
 local C27_NOFMT = cand(8, 4, 32, 44, "q7")
-local C29 = cand(16, 4, 32, 84, "q7", "v2", false)
-local C29_NOFMT = cand(8, 4, 32, 84, "q7", "v2", false)
-local C30 = cand(20, 8, 40, 84, "q7", "v3", false)
+local C29 = cand(16, 4, 32, 84, "q7", "v2", "index")
+local C29_NOFMT = cand(8, 4, 32, 84, "q7", "v2", "index")
+local C30 = cand(20, 8, 40, 84, "q7", "v3", "count")
 local SEARCH_CANDIDATES = {
   ["2.6"] = { C26 }, ["2.7"] = { C27, C27_NOFMT },
   ["2.9"] = { C29, C29_NOFMT, C27, C27_NOFMT }, ["2.10"] = { C29, C29_NOFMT, C27, C27_NOFMT },
@@ -440,6 +483,7 @@ local function search_walk(body, c)
   if n < c.header then return nil end
   local num_layers = u8(body, c.count_off)
   local carriers, cells, beams = {}, {}, {}
+  local beam_total = 0
   local off = c.header
   for layer = 0, num_layers - 1 do
     if n < off + c.carrier then return nil end
@@ -464,25 +508,33 @@ local function search_walk(body, c)
     for ci = 0, num_cells - 1 do
       if n < off + 16 then return nil end
       local num_beams = u8(body, off + 4)
-      local cell = { off = off, layer = layer, cell = ci, pci = u16(body, off), sfn = u16(body, off + 2),
-                     num_beams = num_beams, rsrp = u32(body, off + 8), rsrq = u32(body, off + 12) }
+      local cell = { off = off, layer = layer, cell = ci, pci = u16(body, off), num_beams = num_beams,
+                     rsrp = u32(body, off + 8), rsrq = u32(body, off + 12) }
+      if c.shape == "v2" then cell.sfn = u16(body, off + 2) end
       cells[#cells + 1] = cell
+      beam_total = beam_total + num_beams
       off = off + 16
-      for bi = 0, num_beams - 1 do
-        if n < off + c.beam then return nil end
-        local beam = { off = off, layer = layer, cell = ci, beam = bi, ssb_index = u16(body, off) }
-        if c.full then
-          beam.rx0, beam.rx1 = u32(body, off + 20), u32(body, off + 24)
-          beam.l3_rsrp, beam.l3_rsrq = u32(body, off + 28), u32(body, off + 32)
-          beam.l2_rsrp, beam.l2_rsrq = u32(body, off + 36), u32(body, off + 40)
+      if c.beams == "count" then
+        -- nr.ts: the 84-byte beam records are counted, not read
+        off = off + num_beams * c.beam
+        if off > n then return nil end
+      else
+        for bi = 0, num_beams - 1 do
+          if n < off + c.beam then return nil end
+          local beam = { off = off, layer = layer, cell = ci, beam = bi, ssb_index = u16(body, off) }
+          if c.beams == "full" then
+            beam.rx0, beam.rx1 = u32(body, off + 20), u32(body, off + 24)
+            beam.l3_rsrp, beam.l3_rsrq = u32(body, off + 28), u32(body, off + 32)
+            beam.l2_rsrp, beam.l2_rsrq = u32(body, off + 36), u32(body, off + 40)
+          end
+          beams[#beams + 1] = beam
+          off = off + c.beam
         end
-        beams[#beams + 1] = beam
-        off = off + c.beam
       end
     end
   end
   if off ~= n then return nil end
-  return { num_layers = num_layers, carriers = carriers, cells = cells, beams = beams }
+  return { num_layers = num_layers, carriers = carriers, cells = cells, beams = beams, num_beams = beam_total }
 end
 
 D[0xB97F] = function(body, pinfo, tree, ctx)
@@ -507,7 +559,7 @@ D[0xB97F] = function(body, pinfo, tree, ctx)
     t:add(F.timing_offset, body(12, 4), u32(body, 12))
   end
   t:add(F.num_cells, body(0, 0), #walked.cells)
-  t:add(F.num_beams, body(0, 0), #walked.beams)
+  t:add(F.num_beams, body(0, 0), walked.num_beams)
   local raw = c.scale == "raw"
   local scale = raw and function(v) return v end or q7
   -- record-level headline: the first layer's carrier and its serving cell
@@ -556,9 +608,10 @@ D[0xB97F] = function(body, pinfo, tree, ctx)
   for i, cell in ipairs(walked.cells) do
     local lt = t:add(body(cell.off, 16), string.format("Cell %d", i - 1))
     local pci = plausible(S, "pci", cell.pci, string.format("cell[%d].pci", i - 1))
-    local sfn = plausible(S, "sfn", cell.sfn, string.format("cell[%d].pbch_sfn", i - 1))
     add(lt, "cell.pci", body(cell.off, 2), pci)
-    add(lt, "cell.sfn", body(cell.off + 2, 2), sfn)
+    if cell.sfn ~= nil then
+      add(lt, "cell.sfn", body(cell.off + 2, 2), plausible(S, "sfn", cell.sfn, string.format("cell[%d].pbch_sfn", i - 1)))
+    end
     lt:add(F["cell.num_beams"], body(cell.off + 4, 1), cell.num_beams)
     local rsrp, rsrq
     if raw then
@@ -595,20 +648,97 @@ D[0xB97F] = function(body, pinfo, tree, ctx)
     end
     bt:append_text(string.format(": SSB %s", tostring(ssb)))
   end
+  if not raw then
+    -- the Python check runs after the rows, so a beam-count failure lands after them
+    for i, cell in ipairs(walked.cells) do
+      if cell.num_beams > MAX_BEAMS then S.bad[#S.bad + 1] = string.format("cell[%d].num_beams", i - 1) end
+    end
+  end
   local notes = {}
   if raw then notes[#notes + 1] = "2.6 RSRP/RSRQ scaling is unverified: raw values kept" end
-  if not c.full then
+  if c.beams == "index" then
     S.decoded = "partial"
     notes[#notes + 1] = string.format("%d-byte beam records skipped by size", c.beam)
+  elseif c.beams == "count" then
+    notes[#notes + 1] = string.format("%d-byte beam records counted per cell, not read", c.beam)
   end
   if not known then
     S.decoded = "partial"
     notes[#notes + 1] = "version " .. label .. " not in the table; layout probed by size"
   end
-  finish(S, t, body, ctx, notes)
-  local summary = string.format("PCI %s NR-ARFCN %s", tostring(head_pci), tostring(head_arfcn))
+  finish(S, t, body, ctx, notes, c == C30 and IPHONE_NOTE or DOC_NOTE)
+  local summary = string.format("PCI %s NR-ARFCN %s", n(head_pci), n(head_arfcn))
   if head_rsrp ~= nil then summary = summary .. string.format(" SS-RSRP %s SS-RSRQ %s", fmt(head_rsrp, "dBm"), fmt(head_rsrq, "dB")) end
-  return summary .. string.format(" %d cells %d beams", #walked.cells, #walked.beams)
+  return summary .. string.format(" %d cells %d beams", #walked.cells, walked.num_beams)
+end
+
+-- ---------------------------------------------------------------------------------------------
+-- 0xB887 NR MAC PDSCH Info, 3.13 (nr_mac.decode_pdsch_info; the nr.ts positions)
+
+D[0xB887] = function(body, pinfo, tree, ctx)
+  local major, minor = version_pair(body)
+  if major == nil or body:len() < 8 then return nil end
+  local implemented = major == 3 and minor == 13
+  local num_records = u8(body, 7)
+  -- the size check before anything joins the tree: a misfit leaves the frame bare
+  if implemented and body:len() ~= 8 + num_records * 44 then return nil end
+  local t = tree:add(proto_nr, body())
+  local S = state()
+  local label = header(t, body, ctx, major, minor)
+  if not implemented then
+    S.decoded = "partial"
+    finish(S, t, body, ctx, { "version " .. label .. " not implemented; only 3.13 is" }, false)
+    return "version " .. label .. " not implemented"
+  end
+  local rows = {}
+  for i = 0, num_records - 1 do
+    local off = 8 + i * 44
+    local w2, w4, w5 = u32(body, off + 8), u32(body, off + 16), u32(body, off + 20)
+    local l = string.format("slot[%d].", i)
+    rows[#rows + 1] = {
+      off = off,
+      pci = plausible(S, "pci", u16(body, off + 12) % 1024, l .. "pci"),
+      frame = plausible(S, "sfn", bits(w2, 5, 10), l .. "frame"),
+      slot = plausible(S, "slot", bits(w2, 15, 5), l .. "slot"),
+      tbs = plausible(S, "tb_bytes", bits(w4, 5, 18), l .. "tbs_bytes"),
+      mcs = plausible(S, "mcs", bits(w4, 26, 5), l .. "mcs"),
+      num_rb = plausible(S, "num_rb", bits(w5, 0, 8), l .. "num_rb"),
+      harq = plausible(S, "harq_id", bits(w5, 11, 4), l .. "harq_id"),
+      layers = plausible(S, "layers", bits(w5, 29, 2) + 1, l .. "layers"),
+      crc_pass = u8(body, off + 24) % 2 == 1,
+    }
+  end
+  t:add(F.num_records, body(7, 1), num_records)
+  local tbs_sum, crc_fail = 0, 0
+  for _, row in ipairs(rows) do
+    tbs_sum = tbs_sum + (row.tbs or 0)
+    if not row.crc_pass then crc_fail = crc_fail + 1 end
+  end
+  local head_pci
+  if #rows > 0 then
+    head_pci = rows[1].pci
+    add(t, "pci", body(rows[1].off + 12, 2), head_pci)
+    add(t, "sfn", body(rows[1].off + 8, 4), rows[1].frame)
+    add(t, "slot", body(rows[1].off + 8, 4), rows[1].slot)
+  end
+  t:add(F.tbs_bytes, body(0, 0), tbs_sum)
+  t:add(F.crc_fail, body(0, 0), crc_fail)
+  for i, row in ipairs(rows) do
+    local rt = t:add(body(row.off, 44), string.format("Slot %d", i - 1))
+    add(rt, "pdsch_info.frame", body(row.off + 8, 4), row.frame)
+    add(rt, "pdsch_info.slot", body(row.off + 8, 4), row.slot)
+    add(rt, "pdsch_info.pci", body(row.off + 12, 2), row.pci)
+    add(rt, "pdsch_info.tbs_bytes", body(row.off + 16, 4), row.tbs)
+    add(rt, "pdsch_info.mcs", body(row.off + 16, 4), row.mcs)
+    add(rt, "pdsch_info.num_rb", body(row.off + 20, 4), row.num_rb)
+    add(rt, "pdsch_info.harq_id", body(row.off + 20, 4), row.harq)
+    add(rt, "pdsch_info.layers", body(row.off + 20, 4), row.layers)
+    rt:add(F["pdsch_info.crc_pass"], body(row.off + 24, 1), row.crc_pass and 1 or 0)
+    rt:append_text(string.format(": frame %s slot %s, MCS %s, %s PRB, %s bytes, CRC %s", n(row.frame), n(row.slot),
+                                 n(row.mcs), n(row.num_rb), n(row.tbs), row.crc_pass and "pass" or "fail"))
+  end
+  finish(S, t, body, ctx, {}, IPHONE_NOTE)
+  return string.format("%d slots PCI %s TBS %d bytes CRC fail %d", num_records, n(head_pci), tbs_sum, crc_fail)
 end
 
 -- ---------------------------------------------------------------------------------------------
@@ -624,7 +754,8 @@ end
 -- ---------------------------------------------------------------------------------------------
 -- 0xB888 NR MAC PDSCH Stats (nr_mac.decode_pdsch_stats)
 
-local PDSCH_22, PDSCH_22_SHORT, PDSCH_31 = { 28, 72, 0 }, { 16, 72, 0 }, { 16, 76, 1 }
+-- { header length, record length, u32 words between the carrier id and the counters, count offset }
+local PDSCH_22, PDSCH_22_SHORT, PDSCH_31 = { 28, 72, 0, 15 }, { 16, 72, 0, 15 }, { 16, 76, 1, 12 }
 local PDSCH_CANDIDATES = { ["2.2"] = { PDSCH_22, PDSCH_22_SHORT }, ["3.1"] = { PDSCH_31 } }
 local PDSCH_PROBE = { PDSCH_31, PDSCH_22_SHORT, PDSCH_22 }
 local PDSCH_U32 = { "slots", "decodes", "crc_pass", "crc_fail", "retx", "ack_as_nack", "harq_failure" }
@@ -635,16 +766,20 @@ D[0xB888] = function(body, pinfo, tree, ctx)
   if major == nil or body:len() < 16 then return nil end
   local label = string.format("%d.%d", major, minor)
   local known = PDSCH_CANDIDATES[label] ~= nil
-  local num_records = u8(body, 15)
   local fits = {}
   for _, c in ipairs(PDSCH_CANDIDATES[label] or PDSCH_PROBE) do
-    if body:len() == c[1] + num_records * c[2] then fits[#fits + 1] = c end
+    if body:len() == c[1] + u8(body, c[4]) * c[2] then fits[#fits + 1] = c end
   end
   if #fits == 0 then return nil end
+  local num_records = u8(body, fits[1][4])
   local t = tree:add(proto_nr, body())
   local S = state()
   header(t, body, ctx, major, minor)
-  mac_header(t, body)
+  if fits[1][4] == 12 then
+    t:add(F.num_records, body(12, 1), num_records)
+  else
+    mac_header(t, body)
+  end
   local notes = {}
   local summary = string.format("%d records", num_records)
   if not known and #fits > 1 then
@@ -696,7 +831,7 @@ D[0xB888] = function(body, pinfo, tree, ctx)
       notes[#notes + 1] = "version " .. label .. " not in the table; record layout probed by size"
     end
   end
-  finish(S, t, body, ctx, notes)
+  finish(S, t, body, ctx, notes, (major == 3 and minor == 1) and IPHONE_NOTE or DOC_NOTE)
   return summary
 end
 
@@ -709,7 +844,12 @@ D[0xB883] = function(body, pinfo, tree, ctx)
   if major == nil or body:len() < 16 then return nil end
   local t = tree:add(proto_nr, body())
   local S = state()
-  header(t, body, ctx, major, minor)
+  local label = header(t, body, ctx, major, minor)
+  if not (major == 2 and minor == 11) then
+    S.decoded = "partial"
+    finish(S, t, body, ctx, { "version " .. label .. " not implemented; only 2.11 is" }, false)
+    return "version " .. label .. " not implemented"
+  end
   mac_header(t, body)
   local num_records = u8(body, 15)
   local summary = string.format("%d records", num_records)
@@ -724,7 +864,7 @@ D[0xB883] = function(body, pinfo, tree, ctx)
       t:add(F.carrier_rnti_raw, body(20, 1), u8(body, 20))
       t:add(F.phychan_mask, body(21, 1), u8(body, 21))
     end
-    summary = summary .. string.format(" SFN %s slot %s", tostring(sfn), tostring(slot))
+    summary = summary .. string.format(" SFN %s slot %s", n(sfn), n(slot))
   end
   S.decoded = "partial"
   finish(S, t, body, ctx, { "header and first slot only: the per-carrier records are bit-packed and their count is not documented" })
@@ -772,6 +912,15 @@ end
 D[0xB872] = function(body, pinfo, tree, ctx)
   if body:len() < 8 then return nil end
   local version = u32(body, 0)
+  if version >= 0x10000 then
+    -- the NR minor/major pair (the iPhone 17 writes 3.17): no implemented layout
+    local t = tree:add(proto_nr, body())
+    local S = state()
+    local label = header(t, body, ctx, math.floor(version / 0x10000), version % 0x10000)
+    S.decoded = "partial"
+    finish(S, t, body, ctx, { "version " .. label .. " not implemented; only 4 is" }, false)
+    return "version " .. label .. " not implemented"
+  end
   local ttis, tbs = ul_tb_walk(body)
   if ttis == nil and version ~= 4 then return nil end
   local t = tree:add(proto_nr, body())
@@ -837,5 +986,7 @@ D[0xB872] = function(body, pinfo, tree, ctx)
     notes[#notes + 1] = string.format("version %d not in the table; read with the version-4 layout, which fits by size", version)
   end
   finish(S, t, body, ctx, notes)
-  return string.format("%d TTIs %d TBs grant %d built %d", #ttis, #tbs, grant_sum, built_sum)
+  local summary = string.format("%d TTIs %d TBs", #ttis, #tbs)
+  if #S.bad == 0 and #tbs > 0 then summary = summary .. string.format(" grant %d built %d", grant_sum, built_sum) end
+  return summary
 end

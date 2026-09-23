@@ -4,22 +4,29 @@ SS-RSRP / SS-RSRQ a field engineer reads while walking.
 
 Layout facts: MobileInsight nr_ml1_search_meas_database_update.h and
 nr_ml1_serving_cell_beam_mngt.h (Apache License 2.0), as restated in
-docs/research/qualcomm-measurement-log-layouts.md; the 3.0 carrier and header
-positions of 0xB97F are the ones this repository's own iOS decoder found on an
-iPhone 17 capture (ios/FieldTapKit/Sources/FTPhy/Decoders/B97F.swift). No code
-was copied from any of them.
+docs/research/qualcomm-measurement-log-layouts.md. The 3.0 layout of 0xB97F is a
+port, field for field, of this repository's TypeScript engine
+(web/engine/src/phy/decoders/nr.ts decodeB97F) and iOS decoder
+(ios/FieldTapKit/Sources/FTPhy/Decoders/B97F.swift): SCAT's 3.0 field order as
+facts only, validated on the iPhone 17 (M25) captures of 2026-09-21/22, where the
+walk consumes every record exactly and the cell SS-RSRP is within 0.2 dB of the
+NR measurement reports. No code was copied from any of them.
 
 Each record is a container: a header, then per carrier a carrier record, per
 carrier its cells, per cell its beams. The layout candidates for a version are
 walked in turn and the one that consumes the body exactly is the one reported;
 a body no candidate fits stays raw. Measurements of major.minor 2.7 and later
 are the Q7 fixed point (nr_common.nr_q7). The 2.6 scaling is flagged by its
-own source as an approximation, so 2.6 values are reported raw. Versions
-2.9, 2.10 and 3.0 carry beam records nobody has fully documented: their
-header, carriers and cells are decoded and the beams skipped by size,
-decoded="partial".
+own source as an approximation, so 2.6 values are reported raw. Versions 2.9
+and 2.10 carry 84-byte beam records nobody has fully documented: their header,
+carriers and cells are decoded and the beams skipped by size, decoded="partial".
+3.0 carries the same 84-byte beams; there they are counted per cell and skipped,
+as nr.ts does, and the record is decoded="fields" because everything it reports
+was validated on hardware. The 3.0 carrier's per-Rx serving fields are zero on
+the iPhone 17 and are not read; nor is the cell's second u16, which the 2.x
+layouts call the PBCH SFN and nr.ts does not read.
 
-Layout from documentation; confirm on a hardware capture.
+2.x layouts from documentation; confirm on a hardware capture.
 """
 
 from __future__ import annotations
@@ -28,33 +35,35 @@ import struct
 from typing import Optional
 
 from ..diag.protocol import LogRecord
-from .nr_common import (DOC_NOTE, check_fields, check_rows, diag_record, implausible_note, nr_q7, read_version,
-                        version_label)
+from .nr_common import (DOC_NOTE, IPHONE_NOTE, check_fields, check_rows, diag_record, implausible_note, nr_q7,
+                        read_version, version_label)
 
 NA16 = 0xFFFF
 
 # --- 0xB97F ------------------------------------------------------------------------------------
 
 CELL_LEN = 16
+MAX_BEAMS = 64            # TS 38.213: at most 64 SSBs (L_max) in a burst
 CELL_KINDS = {"pci": "pci", "pbch_sfn": "sfn", "rsrp": "rsrp", "rsrq": "rsrq"}
 CARRIER_KINDS = {"arfcn": "arfcn", "serving_pci": "pci", "serving_rsrp_rx0": "rsrp", "serving_rsrp_rx1": "rsrp"}
 BEAM_KINDS = {"rsrp_rx0": "rsrp", "rsrp_rx1": "rsrp", "nr2nr_rsrp_l3": "rsrp", "nr2nr_rsrq_l3": "rsrq",
               "l2_rsrp_l3": "rsrp", "l2_rsrq_l3": "rsrq"}
 
 # A layout candidate: header length, where the layer count sits, the carrier and beam
-# record lengths, how measurements are scaled ("q7" | "raw" | None = not read), and the
-# carrier record shape ("v2" | "v3").
-def _cand(header, count_off, carrier, beam, scale, shape="v2", full=True):
+# record lengths, how measurements are scaled ("q7" | "raw" | None = not read), the
+# carrier record shape ("v2" | "v3"), and the beams: "full" (the 44-byte record read),
+# "index" (skipped by size, SSB index kept) or "count" (skipped by size, counted only).
+def _cand(header, count_off, carrier, beam, scale, shape="v2", beams="full"):
     return {"header": header, "count_off": count_off, "carrier": carrier, "beam": beam, "scale": scale,
-            "shape": shape, "full": full}
+            "shape": shape, "beams": beams}
 
 
 C26 = _cand(8, 4, 32, 44, "raw")
 C27 = _cand(16, 4, 32, 44, "q7")            # header + the 2.7 format subpacket (freq/timing offset)
 C27_NOFMT = _cand(8, 4, 32, 44, "q7")
-C29 = _cand(16, 4, 32, 84, "q7", full=False)
-C29_NOFMT = _cand(8, 4, 32, 84, "q7", full=False)
-C30 = _cand(20, 8, 40, 84, "q7", shape="v3", full=False)
+C29 = _cand(16, 4, 32, 84, "q7", beams="index")
+C29_NOFMT = _cand(8, 4, 32, 84, "q7", beams="index")
+C30 = _cand(20, 8, 40, 84, "q7", shape="v3", beams="count")
 CANDIDATES = {
     (2, 6): [C26],
     (2, 7): [C27, C27_NOFMT],
@@ -107,15 +116,24 @@ def _walk(body: bytes, cand: dict) -> Optional[dict]:
                 return None
             pci, pbch_sfn, num_beams = struct.unpack_from("<HHB", body, off)
             rsrp, rsrq = struct.unpack_from("<II", body, off + 8)
-            cells.append({"layer": layer, "cell": cell_index, "pci": pci, "pbch_sfn": pbch_sfn,
-                          "num_beams": num_beams, "rsrp" + suffix: scale(rsrp), "rsrq" + suffix: scale(rsrq)})
+            cell = {"layer": layer, "cell": cell_index, "pci": pci}
+            if cand["shape"] == "v2":
+                cell["pbch_sfn"] = pbch_sfn
+            cell.update({"num_beams": num_beams, "rsrp" + suffix: scale(rsrp), "rsrq" + suffix: scale(rsrq)})
+            cells.append(cell)
             off += CELL_LEN
+            if cand["beams"] == "count":
+                # nr.ts: the 84-byte beam records are counted, not read
+                off += num_beams * beam_len
+                if off > len(body):
+                    return None
+                continue
             for beam_index in range(num_beams):
                 if len(body) < off + beam_len:
                     return None
                 ssb_index = struct.unpack_from("<H", body, off)[0]
                 row = {"layer": layer, "cell": cell_index, "beam": beam_index, "ssb_index": ssb_index}
-                if cand["full"]:
+                if cand["beams"] == "full":
                     b0, b1 = struct.unpack_from("<HH", body, off + 4)
                     row["rx_beam_id0"] = None if b0 == NA16 else b0
                     row["rx_beam_id1"] = None if b1 == NA16 else b1
@@ -131,7 +149,8 @@ def _walk(body: bytes, cand: dict) -> Optional[dict]:
                 off += beam_len
     if off != len(body):
         return None
-    out = {"num_layers": num_layers, "carriers": carriers, "cells": cells, "beams": beams}
+    out = {"num_layers": num_layers, "carriers": carriers, "cells": cells, "beams": beams,
+           "num_beams": sum(c["num_beams"] for c in cells)}
     if cand["shape"] == "v2":
         out["ssb_periodicity"] = body[5]
     if cand["header"] == 16:
@@ -160,7 +179,7 @@ def decode_search_meas(rec: LogRecord, info=None):
         if key in walked:
             fields[key] = walked[key]
     fields["num_cells"] = len(cells)
-    fields["num_beams"] = len(beams)
+    fields["num_beams"] = walked["num_beams"]
     if carriers:
         fields["arfcn"] = carriers[0]["arfcn"]
         fields["pci"] = carriers[0]["serving_pci"]
@@ -174,6 +193,7 @@ def decode_search_meas(rec: LogRecord, info=None):
         bad += check_rows(carriers, CARRIER_KINDS, "carrier")
         bad += check_rows(cells, CELL_KINDS, "cell")
         bad += check_rows(beams, BEAM_KINDS, "beam")
+        bad += ["cell[%d].num_beams" % i for i, row in enumerate(cells) if row["num_beams"] > MAX_BEAMS]
     else:
         bad += check_fields(fields, {"arfcn": "arfcn", "pci": "pci"})
         bad += check_rows(carriers, {"arfcn": "arfcn", "serving_pci": "pci"}, "carrier")
@@ -184,14 +204,18 @@ def decode_search_meas(rec: LogRecord, info=None):
     if bad:
         decoded = "partial"
         notes.insert(0, implausible_note(bad))
-    if not cand["full"]:
+    if cand["beams"] == "index":
         decoded = "partial"
         notes.append("%d-byte beam records skipped by size" % cand["beam"])
+    elif cand["beams"] == "count":
+        notes.append("%d-byte beam records counted per cell, not read" % cand["beam"])
     if not known:
         decoded = "partial"
         notes.append("version %s not in the table; layout probed by size" % fields["version"])
-    notes.append(DOC_NOTE)
-    sections = [("carriers", carriers), ("cells", cells), ("beams", beams)]
+    notes.append(IPHONE_NOTE if cand is C30 else DOC_NOTE)
+    sections = [("carriers", carriers), ("cells", cells)]
+    if cand["beams"] != "count":
+        sections.append(("beams", beams))
     return diag_record(rec, info, "NR ML1 Searcher Measurement DB Update Ext", raw_version, fields, sections,
                        decoded, notes)
 
@@ -251,4 +275,26 @@ def decode_beam_mgmt(rec: LogRecord, info=None):
                        [("beams", beams)], decoded, notes)
 
 
+def _n(value) -> str:
+    return "n/a" if value is None else "%d" % value
+
+
+def _db(value, unit: str) -> str:
+    return "n/a" if value is None else "%.1f %s" % (value, unit)
+
+
+def summary_search_meas(fields: dict) -> str:
+    """The Info-column line of 0xB97F; wireshark/fieldtap_nr.lua prints the same."""
+    out = "PCI %s NR-ARFCN %s" % (_n(fields.get("pci")), _n(fields.get("arfcn")))
+    if fields.get("rsrp") is not None:
+        out += " SS-RSRP %s SS-RSRQ %s" % (_db(fields["rsrp"], "dBm"), _db(fields.get("rsrq"), "dB"))
+    return out + " %d cells %d beams" % (fields["num_cells"], fields["num_beams"])
+
+
+def summary_beam_mgmt(fields: dict) -> str:
+    return "PCI %s SS-RSRP %s SS-RSRQ %s %d beams" % (_n(fields.get("pci")), _db(fields.get("rsrp"), "dBm"),
+                                                      _db(fields.get("rsrq"), "dB"), fields["num_beams"])
+
+
 DECODERS = {"nr_ml1_search_meas": decode_search_meas, "nr_ml1_beam": decode_beam_mgmt}
+SUMMARIES = {0xB97F: summary_search_meas, 0xB975: summary_beam_mgmt}

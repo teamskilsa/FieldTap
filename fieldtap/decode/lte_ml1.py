@@ -25,6 +25,13 @@ are all zero is "not present" (a two-antenna modem in a four-antenna layout).
 0xB193 headline `snr` is the best FTL SNR branch; the per-branch values are kept as
 snr_rx0..snr_rx3. Bit fields: "skip N, then M bits" of a little-endian word means
 (word >> N) & ((1 << M) - 1).
+
+The iPhone 17 (Qualcomm M25) logs versions the documentation does not have: 0xB193
+subpacket 0x19 v66 and 0xB179 v56. Those two layouts were derived and validated on
+the captures of 2026-09-21/22 by this repository's TypeScript engine
+(web/engine/src/phy/decoders/b193.ts and b179.ts) and are ported here field for
+field; they carry a different note ("validated on the iPhone 17 ...") instead of
+the documentation caveat.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from ..diag.protocol import LogRecord
 from .records import DiagRecord
 
 DOC_NOTE = "layout from documentation; confirm on a hardware capture"
+HW_NOTE = "layout validated on the iPhone 17 (M25) captures of 2026-09-21/22"
 
 SUBPACKET_SERVING_CELL_MEAS = 25       # 0x19
 
@@ -176,6 +184,32 @@ SCMR_LAYOUTS = {
                                   _skip(12), _skip(4), _SIR, _POST_IC_RSRQ] + _CINR, True),
 }
 
+# Subpacket 0x19 v66 (iPhone 17, M25): web/engine/src/phy/decoders/b193.ts. The v40 field
+# order with each 144-byte cell record starting with a u32 Rx map (bit k = Rx k measured)
+# and 4 bytes before the PCI word (pci bits 0-8, carrier bits 9-11, serving bit 15); the
+# measurement words sit at cell offset 24 + 4*i. The combined RSRP is stored 640 units
+# (40 dB) below the per-Rx scale. There is no SNR: the projected-SIR slot of the older
+# versions is not SIR on this version, so nothing is read after RSSI.
+_PCI16_V66 = ("w", 2, [("pci", 0, 9, "pci"), ("serving_cell_index", 9, 3, "u"), ("is_serving_cell", 15, 1, "u")])
+_CELL_V66 = [_u("rx_map", 4), _skip(4), _PCI16_V66, _skip(14),
+             _RSRP_RX0, _RSRP_RX1, _RSRP_RX2, _skip(4),
+             _w(("rsrp_rx3", 0, 12, "rsrp"), ("rsrp", 12, 12, "rsrp640")),
+             _w(("filtered_rsrp", 12, 12, "rsrp")),
+             _w(("rsrq_rx0", 0, 10, "rsrq"), ("rsrq_rx1", 20, 10, "rsrq")),
+             _w(("rsrq_rx2", 10, 10, "rsrq"), ("rsrq_rx3", 20, 10, "rsrq")),
+             _w(("rsrq", 0, 10, "rsrq"), ("filtered_rsrq", 20, 10, "rsrq")),
+             _w(("rssi_rx0", 0, 11, "rssi"), ("rssi_rx1", 11, 11, "rssi")),
+             _w(("rssi_rx2", 0, 11, "rssi"), ("rssi_rx3", 11, 11, "rssi")),
+             _RSSI_LOW, _skip(72)]
+SCMR_LAYOUTS[66] = (_HEADER_CELLS_VALID_RX, _CELL_V66, True)
+assert sum(step[1] for step in _CELL_V66) == 144
+
+# Versions whose layout was validated on hardware (the note says so instead of DOC_NOTE).
+HW_VALIDATED_SCMR = {66}
+# v66 has an Rx map per cell: a per-Rx value of an antenna the map does not cover is not
+# a measurement, whatever bits the word holds.
+_RX_MAPPED_VERSIONS = {66}
+
 # v36's table ends after RSRQ; the rest of each cell is undocumented, so the cell
 # stride comes from the subpacket size rather than from the table.
 _OPEN_ENDED_VERSIONS = {36}
@@ -218,6 +252,17 @@ def _best_snr(row: dict):
     return max(values) if values else None
 
 
+def _apply_rx_map(row: dict) -> None:
+    """v66: drop the per-Rx values of antennas the cell's Rx map says were not measured,
+    and count the measured ones as num_rx."""
+    rx_map = row.get("rx_map") or 0
+    row["num_rx"] = bin(rx_map & 0xF).count("1")
+    for i in range(4):
+        if not (rx_map >> i) & 1:
+            for kind in ("rsrp", "rsrq", "rssi"):
+                row["%s_rx%d" % (kind, i)] = None
+
+
 def _record(rec: LogRecord, info, version: int, fields: dict, sections: list, decoded: str, notes: list) -> DiagRecord:
     return DiagRecord(rec.code, info.name if info else "LTE ML1", version, rec.timestamp, rec.timestamp_raw,
                       rec.body, fields=fields, sections=sections, decoded=decoded,
@@ -234,7 +279,7 @@ def decode_scell_meas(rec: LogRecord, info=None) -> Optional[DiagRecord]:
         return None
     version, num_subpackets = body[0], body[1]
     fields = {"version": version, "num_subpackets": num_subpackets}
-    notes = [DOC_NOTE]
+    notes = []
     subpackets = []
     cells = []
     decoded = "partial"
@@ -260,6 +305,8 @@ def decode_scell_meas(rec: LogRecord, info=None) -> Optional[DiagRecord]:
         off += sp_size
     if not subpackets:
         notes.append("no subpackets")
+    # The source of the layout leads the note: hardware-validated for v66, documentation otherwise.
+    notes.insert(0, HW_NOTE if fields.get("subpacket_version") in HW_VALIDATED_SCMR else DOC_NOTE)
     sections = []
     if cells:
         sections.append(("cells", cells))
@@ -302,15 +349,22 @@ def _decode_scmr(body: bytes, start: int, end: int, sp_version: int, fields: dic
     for i in range(num_cells):
         row = {"cell": i}
         run_steps(body, off + i * stride, cell_steps, row, bad)
+        if sp_version in _RX_MAPPED_VERSIONS:
+            _apply_rx_map(row)
         row["snr"] = _best_snr(row)
         cells.append(row)
-    serving = next((c for c in cells if c.get("is_serving_cell") == 1), cells[0])
+    # The headline is the PCell (a serving cell on carrier 0), else any serving cell, else the first.
+    serving_cells = [c for c in cells if c.get("is_serving_cell") == 1]
+    serving = next((c for c in serving_cells if c.get("serving_cell_index") == 0),
+                   serving_cells[0] if serving_cells else cells[0])
     fields.update(header)
-    for key in ("pci", "serving_cell_index", "sfn", "subframe", "rsrp", "rsrq", "rssi", "snr",
+    for key in ("pci", "serving_cell_index", "sfn", "subframe", "rx_map", "num_rx", "rsrp", "rsrq", "rssi", "snr",
                 "filtered_rsrp", "filtered_rsrq", "projected_sir", "post_ic_rsrq"):
         if key in serving:
             fields[key] = serving[key]
     fields["num_cells"] = num_cells
+    if sp_version in HW_VALIDATED_SCMR:
+        notes.append("v%d: no SNR field (the older versions' projected-SIR slot is not SIR here)" % sp_version)
     if bad:
         notes.append("implausible: " + ", ".join(bad))
         return "partial"
@@ -338,14 +392,29 @@ _NEIGHBOUR_12 = ("<Hhhh4x", 12)
 _NEIGHBOUR_10 = ("<Hhhh2x", 10)
 _DETECTED = {3: "<IIQ", 4: "<H2xIQ"}
 
+# v56 (iPhone 17, M25): web/engine/src/phy/decoders/b179.ts. Not bit packed at all:
+#   u8 version @0, 3 reserved, u32 @4 not identified (0, 9, 18 or 27; not the neighbour
+#   count), u32 EARFCN @8, u16 serving PCI @12, u16 TTI @14 (= SFN * 10 + subframe),
+#   u16 RSRP @16 (the same value again @18), u16 RSRQ @20 (again @22), u32 neighbour
+#   count @24, then 12-byte neighbours: u16 PCI @0, u16 RSRP @2 (again @4), u16 RSRQ @6
+#   (again @8), u16 zero @10. The body length must equal 28 + 12 * count: a body the count
+#   does not explain is not read. These records carry no DIAG timestamp; the TTI is
+#   their only clock.
+_INTRA_V56_VERSION = 56
+_INTRA_V56_HEADER = 28
+_INTRA_V56_NEIGHBOUR = 12
+
 
 def decode_intra_meas(rec: LogRecord, info=None) -> Optional[DiagRecord]:
     """0xB179: serving RSRP/RSRQ plus the intra-frequency neighbours the modem measured
-    and the cells it only detected (versions 3 and 4)."""
+    and the cells it only detected (versions 3 and 4), or the flat v56 layout of the
+    iPhone 17 modem."""
     body = rec.body
     if len(body) < 8:
         return None
     version = body[0]
+    if version == _INTRA_V56_VERSION:
+        return _decode_intra_meas_v56(rec, info)
     serving_cell_index = body[4] & 7
     layout = _INTRA_HEADER.get(version)
     fields = {"version": version, "serving_cell_index": serving_cell_index}
@@ -408,6 +477,52 @@ def decode_intra_meas(rec: LogRecord, info=None) -> Optional[DiagRecord]:
         notes.append("implausible: " + ", ".join(bad))
         decoded = "partial"
     return _record(rec, info, version, fields, sections, decoded, notes)
+
+
+def _decode_intra_meas_v56(rec: LogRecord, info=None) -> Optional[DiagRecord]:
+    body = rec.body
+    if len(body) < _INTRA_V56_HEADER:
+        return None
+    n_nb = struct.unpack_from("<I", body, 24)[0]
+    if len(body) != _INTRA_V56_HEADER + _INTRA_V56_NEIGHBOUR * n_nb:
+        return None
+    unidentified, earfcn, pci, tti, rsrp_raw, _dup1, rsrq_raw, _dup2 = struct.unpack_from("<IIHHHHHH", body, 4)
+    fields = {"version": _INTRA_V56_VERSION, "unidentified_word": unidentified, "earfcn": earfcn,
+              "tti": tti, "sfn": tti // 10, "subframe": tti % 10}
+    notes = [HW_NOTE, "no DIAG timestamp on this version; the TTI is the record's clock"]
+    bad = []
+
+    def meas(prefix, raw_rsrp, raw_rsrq, out):
+        for name, raw, conv, kind in (("rsrp", raw_rsrp, rsrp_dbm, "rsrp"), ("rsrq", raw_rsrq, rsrq_db, "rsrq")):
+            value = conv(raw)
+            if plausible(kind, value):
+                out[name] = value
+            else:
+                out[name] = None
+                bad.append("%s%s=%.1f" % (prefix, name, value))
+
+    fields["pci"] = pci if plausible("pci", pci) else None
+    if fields["pci"] is None:
+        bad.append("pci=%d" % pci)
+    meas("", rsrp_raw, rsrq_raw, fields)
+    if fields["sfn"] > 1023:
+        bad.append("tti=%d" % tti)
+        fields["sfn"] = fields["subframe"] = None
+    fields["num_neighbours"] = n_nb
+    neighbours = []
+    for i in range(n_nb):
+        o = _INTRA_V56_HEADER + _INTRA_V56_NEIGHBOUR * i
+        n_pci, n_rsrp, _d1, n_rsrq = struct.unpack_from("<HHHH", body, o)
+        row = {"pci": n_pci if plausible("pci", n_pci) else None}
+        if row["pci"] is None:
+            bad.append("neighbour%d.pci=%d" % (i, n_pci))
+        meas("neighbour%d." % i, n_rsrp, n_rsrq, row)
+        neighbours.append(row)
+    decoded = "fields"
+    if bad:
+        notes.append("implausible: " + ", ".join(bad))
+        decoded = "partial"
+    return _record(rec, info, _INTRA_V56_VERSION, fields, [("neighbours", neighbours), ("detected", [])], decoded, notes)
 
 
 def intra_meas_summary(fields: dict) -> str:

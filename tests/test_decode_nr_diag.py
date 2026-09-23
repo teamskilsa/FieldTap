@@ -1,7 +1,9 @@
-"""The NR record decoders (0xB822, 0xB823, 0xB80C, 0xB975, 0xB97F, 0xB888, 0xB883,
-0xB872) on synthetic records packed independently of their tables: every field of
-every version, None on truncated or misfitting bodies, "partial" with a note when a
-value is implausible, and the 0xB80C NAS fallback on the synthetic corpus record."""
+"""The NR record decoders (0xB822, 0xB823, 0xB80C, 0xB975, 0xB97F, 0xB887, 0xB888,
+0xB883, 0xB872) on synthetic records packed independently of their tables: every field
+of every version, None on truncated or misfitting bodies, "partial" with a note when a
+value is implausible, and the 0xB80C NAS fallback on the synthetic corpus record. The
+iPhone 17 (M25) layouts (0xB887 3.13, 0xB888 3.1, 0xB97F 3.0, 0xB80C 3.0) are checked
+on the real captures by tests/test_decode_nr_real.py."""
 
 import csv
 import os
@@ -18,6 +20,7 @@ from fieldtap.session import CELLS_COLUMNS, Session
 
 TS = 0x0123456789ABCDEF
 DOC = nr_common.DOC_NOTE
+IPHONE = nr_common.IPHONE_NOTE
 
 
 def rec(code, body):
@@ -235,6 +238,36 @@ def test_mm5g_state_record_every_field():
     assert r.fields["plmn"] == "00101" and r.fields["update_status"] == "not_updated"
 
 
+def test_mm5g_state_3_0_is_the_version_1_body_without_the_tmsi():
+    # The iPhone 17's one record: deregistered, no cell, AT&T, no GUTI yet, one trailing byte.
+    body = fx.nr_mm5g_state_body(state=1, substate=2, mcc=310, mnc=410, version=0x00030000, guti_none=True,
+                                 update_status=1, tac=0, trailing=b"\x00")
+    assert len(body) == 27
+    r = diag(0xB80C, body)
+    assert r.decoded == "fields" and r.version == 0x00030000
+    assert r.note == "5G-TMSI not reported; 1 trailing byte(s) not read; " + IPHONE
+    f = r.fields
+    assert f["version"] == "3.0" and f["state"] == "deregistered" and f["substate"] == "no_cell_available"
+    assert f["plmn"] == "310410" and f["update_status"] == "not_updated" and f["tac"] == 0
+    assert f["guti_assigned"] is False and "guti_plmn" not in f and "amf_set_id" not in f
+    assert nr_state.summary_mm5g_state(f) == "deregistered PLMN 310410 TAC 0"
+    # registered with a GUTI: the network part is reported, the 5G-TMSI never is
+    body = fx.nr_mm5g_state_body(version=0x00030000, tmsi=0x0CC6E898, amf_region=7, amf_set=33, amf_pointer=2)
+    r = diag(0xB80C, body)
+    assert r.decoded == "fields" and r.note == "5G-TMSI not reported; " + IPHONE
+    f = r.fields
+    assert f["guti_assigned"] is True and f["guti_plmn"] == "311480" and f["guti_ue_id_type"] == "5g_guti"
+    assert (f["amf_region_id"], f["amf_set_id"], f["amf_pointer"]) == (7, 33, 2)
+    assert "tmsi_5g" not in f and "0CC6E898" not in repr(f).upper() and "0CC6E898" not in r.comment().upper()
+    assert r.comment().startswith("FieldTap 0xB80C NR NAS MM5G State v196608 | state registered | plmn 311480")
+    # an unknown state code is not the state layout; a 3.0 body cut short is not either
+    wrong = bytearray(body)
+    wrong[4] = 9
+    info = LOG_CODES[0xB80C]
+    assert nr_state.decode_mm5g_state(rec(0xB80C, bytes(wrong)), info) is None
+    assert nr_state.decode_mm5g_state(rec(0xB80C, body[:25]), info) is None
+
+
 def test_mm5g_state_plmn_encoding():
     assert nr_state.decode_plmn(fx.plmn_octets(311, 480, 3)) == "311480"
     assert nr_state.decode_plmn(fx.plmn_octets(1, 1, 2)) == "00101"
@@ -391,17 +424,27 @@ def test_search_meas_2_9_and_2_10_skip_the_84_byte_beams(major, minor):
 
 
 def test_search_meas_3_0_layout():
+    """The nr.ts layout: carriers and cells read, the 84-byte beams counted and skipped."""
     body = fx.nr_search_meas_body(3, 0)
     assert len(body) == 20 + 40 + 2 * 16 + 3 * 84 and body[8] == 1
     r = diag(0xB97F, body)
-    assert r.decoded == "partial" and "84-byte beam records skipped by size" in r.note
+    assert r.decoded == "fields" and r.confidence == "high"
+    assert r.note == "84-byte beam records counted per cell, not read; " + IPHONE
     f = r.fields
     assert f["version"] == "3.0" and f["num_layers"] == 1 and "ssb_periodicity" not in f and "freq_offset" not in f
     assert f["pci"] == 417 and f["arfcn"] == 647328 and f["rsrp"] == -90.0 and f["rsrq"] == -10.5
+    assert f["num_cells"] == 2 and f["num_beams"] == 3
     rows = dict(r.sections)
+    assert list(rows) == ["carriers", "cells"]
     assert rows["carriers"] == [{"layer": 0, "arfcn": 647328, "cc_id": 0, "num_cells": 2, "serving_pci": 417}]
-    assert rows["cells"] == _expected_rows_27()["cells"]
-    assert [b["ssb_index"] for b in rows["beams"]] == [3, 5, 1]
+    assert rows["cells"] == [{"layer": 0, "cell": 0, "pci": 417, "num_beams": 2, "rsrp": -90.0, "rsrq": -10.5},
+                             {"layer": 0, "cell": 1, "pci": 418, "num_beams": 1, "rsrp": -101.75, "rsrq": -15.0}]
+    assert nr_ml1.summary_search_meas(f) == "PCI 417 NR-ARFCN 647328 SS-RSRP -90.0 dBm SS-RSRQ -10.5 dB 2 cells 3 beams"
+    # a candidate SCG carrier: cc id 255, no serving cell, so no headline RSRP
+    r = diag(0xB97F, fx.nr_search_meas_body(3, 0, carriers=[fx.carrier(650000, 0xFFFF, [fx.cell(300, 1, -110.0, -17.5)], cc_id=255)]))
+    assert r.decoded == "fields" and r.fields["pci"] is None and "rsrp" not in r.fields
+    assert dict(r.sections)["carriers"][0]["cc_id"] == 255
+    assert nr_ml1.summary_search_meas(r.fields) == "PCI n/a NR-ARFCN 650000 1 cells 0 beams"
 
 
 def test_search_meas_3_0_count_sentinel_uses_the_serving_index():
@@ -410,7 +453,13 @@ def test_search_meas_3_0_count_sentinel_uses_the_serving_index():
     body = bytearray(fx.nr_search_meas_body(3, 0, carriers=[fx.carrier(647328, 417, cells, serving_index=2)]))
     body[20 + 5] = 0xFF
     r = diag(0xB97F, bytes(body))
-    assert r.decoded == "partial" and [c["pci"] for c in dict(r.sections)["cells"]] == [417, 418]
+    assert r.decoded == "fields" and [c["pci"] for c in dict(r.sections)["cells"]] == [417, 418]
+    # a beam count no SSB burst can have marks the record partial
+    body = bytearray(fx.nr_search_meas_body(3, 0, carriers=[fx.carrier(647328, 417, [fx.cell(417, 512, -90.0, -10.5)])]))
+    body[20 + 40 + 4] = 65
+    body += bytes(65 * 84)
+    r = diag(0xB97F, bytes(body))
+    assert r.decoded == "partial" and r.note.startswith("implausible: cell[0].num_beams; ")
 
 
 def test_search_meas_two_carriers_and_no_serving_cell():
@@ -479,12 +528,19 @@ def test_pdsch_stats_every_field(major, minor, header_len, record_len):
     body = fx.nr_pdsch_stats_body(major, minor, records, header_len=header_len, flags=(1, 0, 1, 0, 1, 0), bmask=0x1234)
     assert len(body) == header_len + 2 * record_len
     r = diag(0xB888, body)
-    assert r.decoded == "fields" and r.version == (major << 16) | minor and r.note == DOC
+    assert r.decoded == "fields" and r.version == (major << 16) | minor
     f = r.fields
     assert f["version"] == "%d.%d" % (major, minor) and f["num_records"] == 2
-    assert (f["sleep"], f["beam_change"], f["signal_change"], f["dl_dyn_cfg_change"], f["dl_config"], f["ul_config"]) == (1, 0, 1, 0, 1, 0)
-    assert f["log_fields_change_bmask"] == 0x1234
+    if (major, minor) == (3, 1):
+        # the iPhone 17 header carries no change flags; its count is the u8 @12
+        assert r.note == IPHONE and body[12] == 2 and body[15] == 0 and "sleep" not in f
+    else:
+        assert r.note == DOC
+        assert (f["sleep"], f["beam_change"], f["signal_change"], f["dl_dyn_cfg_change"], f["dl_config"], f["ul_config"]) == (1, 0, 1, 0, 1, 0)
+        assert f["log_fields_change_bmask"] == 0x1234
+    assert f["carrier"] == 0 and f["num_slots_elapsed"] == 2000 and f["num_retx"] == 28
     assert f["num_pdsch_decode"] == 1500 and f["num_crc_pass_tb"] == 1470 and f["num_crc_fail_tb"] == 30
+    assert f["crc_pass_tb_bytes"] == 4_400_000 and f["crc_fail_tb_bytes"] == 90_000
     assert f["tb_bytes"] == 4_490_000 and f["bler_pct"] == pytest.approx(2.0)
     rows = dict(r.sections)["records"]
     assert len(rows) == 2
@@ -493,6 +549,29 @@ def test_pdsch_stats_every_field(major, minor, header_len, record_len):
             assert row[key] == exp[src], key
     assert rows[1]["bler_pct"] == pytest.approx(25.0) and rows[1]["record"] == 1
     assert "num_pdsch_decode 1500" in r.comment() and "records x2" in r.comment()
+    assert nr_mac.summary_pdsch_stats(f) == "1500 decodes BLER 2.0 % TB bytes 4490000"
+
+
+def test_pdsch_stats_3_1_as_the_iphone_17_writes_it():
+    """The first 0xB888 of the 2026-09-21 capture, counters as logged (no identifiers in it)."""
+    body = bytes.fromhex("0100030000000001d0e501100100000000000000000000005d1e00009b000000920000000900000009000000"
+                         "000000000000000028a10100000000003e1800000000000066b9010000000000210d0000000000003e18"
+                         "000000000000")
+    assert len(body) == 92
+    r = diag(0xB888, body)
+    assert r.decoded == "fields" and r.confidence == "high" and r.note == IPHONE
+    f = r.fields
+    assert f["version"] == "3.1" and f["num_records"] == 1 and f["carrier"] == 0
+    assert (f["num_slots_elapsed"], f["num_pdsch_decode"], f["num_crc_pass_tb"], f["num_crc_fail_tb"], f["num_retx"]) == (7773, 155, 146, 9, 9)
+    assert (f["crc_pass_tb_bytes"], f["crc_fail_tb_bytes"], f["tb_bytes"]) == (106792, 6206, 112998)
+    assert f["bler_pct"] == pytest.approx(100.0 * 9 / 155)
+    row = dict(r.sections)["records"][0]
+    assert (row["ack_as_nack"], row["harq_failure"], row["padding_bytes"], row["retx_bytes"]) == (0, 0, 3361, 6206)
+    assert nr_mac.summary_pdsch_stats(f) == "155 decodes BLER 5.8 % TB bytes 112998"
+    # the counters are cumulative: the very same record 5 ms later differs only in slots elapsed
+    later = bytearray(body)
+    later[24] = 0x62
+    assert diag(0xB888, bytes(later)).fields["num_slots_elapsed"] == 7778
 
 
 def test_pdsch_stats_no_records_and_zero_totals():
@@ -518,9 +597,10 @@ def test_pdsch_stats_unknown_version_is_probed_or_header_only():
     r = diag(0xB888, body)
     assert r.decoded == "partial" and "version 3.2 not in the table; record layout probed by size" in r.note
     assert dict(r.sections)["records"][0]["num_pdsch_decode"] == 1500
-    # three records: 16 + 3*76 == 28 + 3*72, so two layouts fit and neither is chosen
-    body = fx._version(3, 2) + fx.nr_pdsch_stats_body(3, 1, [fx.pdsch_record()] * 3)[4:]
-    r = diag(0xB888, body)
+    # three records: 16 + 3*76 == 28 + 3*72, so two layouts fit (count @12 and @15) and neither is chosen
+    body = bytearray(fx._version(3, 2) + fx.nr_pdsch_stats_body(3, 1, [fx.pdsch_record()] * 3)[4:])
+    body[15] = 3
+    r = diag(0xB888, bytes(body))
     assert r.decoded == "partial" and "more than one record layout fits; header only" in r.note
     assert r.fields["num_records"] == 3 and r.sections == [("records", [])] and "num_pdsch_decode" not in r.fields
 
@@ -556,6 +636,20 @@ def test_ul_sched_short_and_implausible():
     assert nr_mac.decode_ul_sched(rec(0xB883, fx.nr_ul_sched_body()[:15])) is None
     r = diag(0xB883, fx.nr_ul_sched_body(slot=160, numerology=5, frame=1024))
     assert "implausible: slot, numerology, sfn" in r.note and r.fields["sfn"] is None and r.fields["slot"] is None
+    assert nr_mac.summary_ul_sched(r.fields) == "1 records SFN n/a slot n/a"
+    assert nr_mac.summary_ul_sched(diag(0xB883, fx.nr_ul_sched_body()).fields) == "1 records SFN 512 slot 7"
+
+
+def test_ul_sched_3_26_has_no_layout_and_says_so():
+    """The iPhone 17's version: not a layout miss, a known-unimplemented version."""
+    r = diag(0xB883, fx._version(3, 26) + bytes(range(36)))
+    assert r.decoded == "partial" and r.fields == {"version": "3.26"} and r.sections == []
+    assert r.note == "version 3.26 not implemented; only 2.11 is"
+    assert nr_mac.summary_ul_sched(r.fields) == "version 3.26 not implemented"
+    assert r.comment() == "FieldTap 0xB883 NR MAC UL Physical Channel Schedule Report v196634 | version 3.26 | " + r.note
+    d = Decoder()
+    d.decode(rec(0xB883, fx._version(3, 26) + bytes(60)))
+    assert d.report()["errors"] == {} and d.report()["coverage"]["0xB883"]["as"] == {"partial": 1}
 
 
 # --- 0xB872 NR L2 UL Transport Block ---------------------------------------------------------------
@@ -616,6 +710,15 @@ def test_ul_tb_other_versions():
     assert diag(0xB872, fx.nr_ul_tb_body(version=5)[:20]).decoded == "raw"
 
 
+def test_ul_tb_3_17_has_no_layout_and_says_so():
+    r = diag(0xB872, fx._version(3, 17) + bytes(range(60)))
+    assert r.decoded == "partial" and r.fields == {"version": "3.17"} and r.version == 0x00030011
+    assert r.note == "version 3.17 not implemented; only 4 is"
+    assert nr_mac.summary_ul_tb(r.fields) == "version 3.17 not implemented"
+    assert nr_mac.summary_ul_tb(diag(0xB872, fx.nr_ul_tb_body()).fields) == "1 TTIs 1 TBs grant 1024 built 1000"
+    assert nr_mac.summary_ul_tb(diag(0xB872, fx.nr_ul_tb_body()[:12]).fields) == "1 TTIs (records did not fit)"
+
+
 def test_ul_tb_implausible_values_are_partial():
     r = diag(0xB872, fx.nr_ul_tb_body(4, [fx.ul_tti(slot=7, sfn=512, tbs=[fx.ul_tb(grant=1000, built=1001)])]))
     assert r.decoded == "partial" and "implausible: tb[0].bytes_built" in r.note
@@ -624,6 +727,69 @@ def test_ul_tb_implausible_values_are_partial():
     r = diag(0xB872, fx.nr_ul_tb_body(4, [fx.ul_tti(slot=160, sfn=512, tbs=[fx.ul_tb(numerology=7, grant=1 << 21, built=0)])]))
     assert "implausible: tti[0].slot, tb[0].numerology, tb[0].grant_bytes" in r.note
     assert dict(r.sections)["ttis"][0]["slot"] is None
+
+
+# --- 0xB887 NR MAC PDSCH Info -----------------------------------------------------------------------
+
+@pytest.mark.parametrize("fill", [0, 1])
+def test_pdsch_info_every_field(fill):
+    """Every bit the decoder must not read is `fill`, so a misplaced field shows up."""
+    slots = [fx.pdsch_slot(frame=1023, slot=31, pci=1007, tbs=(1 << 18) - 1, mcs=31, n_rb=255, harq=15, layers=4),
+             fx.pdsch_slot(frame=0, slot=0, pci=0, tbs=0, mcs=0, n_rb=0, harq=0, layers=1, crc_ok=False),
+             fx.pdsch_slot(frame=571, slot=5, pci=80, tbs=169, mcs=17, n_rb=48, harq=3, layers=2)]
+    body = fx.nr_pdsch_info_body(3, 13, slots, fill=fill)
+    assert len(body) == 8 + 3 * 44 and body[7] == 3
+    r = diag(0xB887, body)
+    assert r.decoded == "fields" and r.version == (3 << 16) | 13 and r.confidence == "high" and r.note == IPHONE
+    f = r.fields
+    assert f["version"] == "3.13" and f["num_records"] == 3 and f["pci"] == 1007 and f["sfn"] == 1023 and f["slot"] == 31
+    assert f["tbs_bytes"] == (1 << 18) - 1 + 169 and f["crc_fail"] == 1
+    rows = dict(r.sections)["slots"]
+    assert rows[0] == {"record": 0, "frame": 1023, "slot": 31, "pci": 1007, "tbs_bytes": (1 << 18) - 1, "mcs": 31,
+                       "num_rb": 255, "harq_id": 15, "layers": 4, "crc_pass": True}
+    assert rows[1] == {"record": 1, "frame": 0, "slot": 0, "pci": 0, "tbs_bytes": 0, "mcs": 0, "num_rb": 0,
+                       "harq_id": 0, "layers": 1, "crc_pass": False}
+    assert rows[2] == {"record": 2, "frame": 571, "slot": 5, "pci": 80, "tbs_bytes": 169, "mcs": 17, "num_rb": 48,
+                       "harq_id": 3, "layers": 2, "crc_pass": True}
+    assert nr_mac.summary_pdsch_info(f) == "3 slots PCI 1007 TBS 262312 bytes CRC fail 1"
+    assert r.comment().startswith("FieldTap 0xB887 NR MAC PDSCH Info v196621 | pci 1007 | sfn 1023 | tbs_bytes 262312")
+    assert "slots x3" in r.comment()
+
+
+def test_pdsch_info_as_the_iphone_17_writes_it():
+    """The second 0xB887 of the 2026-09-21 capture: two slots of the n5 cell, PCI 80."""
+    body = bytes.fromhex("0d0003000000000208003c02010000008147448050c8aa0ae00100000400c000030042220c000004000000000000"
+                         "00000000000009003c020100000081c7448050c8aa0a201900003408c000030042220000000400000000000000"
+                         "0000000000")
+    assert len(body) == 8 + 2 * 44
+    r = diag(0xB887, body)
+    assert r.decoded == "fields" and r.fields["num_records"] == 2 and r.fields["pci"] == 80
+    rows = dict(r.sections)["slots"]
+    assert (rows[0]["frame"], rows[0]["slot"], rows[0]["tbs_bytes"], rows[0]["num_rb"], rows[0]["harq_id"]) == (572, 8, 15, 4, 0)
+    assert (rows[1]["frame"], rows[1]["slot"], rows[1]["tbs_bytes"], rows[1]["num_rb"], rows[1]["harq_id"]) == (572, 9, 201, 52, 1)
+    assert all(row["mcs"] == 0 and row["layers"] == 1 and row["crc_pass"] for row in rows)
+    assert nr_mac.summary_pdsch_info(r.fields) == "2 slots PCI 80 TBS 216 bytes CRC fail 0"
+
+
+def test_pdsch_info_no_slots_misfits_and_other_versions():
+    r = diag(0xB887, fx.nr_pdsch_info_body(3, 13, []))
+    assert r.decoded == "fields" and r.fields["num_records"] == 0 and r.fields["tbs_bytes"] == 0 and "pci" not in r.fields
+    assert nr_mac.summary_pdsch_info(r.fields) == "0 slots PCI n/a TBS 0 bytes CRC fail 0"
+    good = fx.nr_pdsch_info_body()
+    for cut in (0, 3, 7, 20, len(good) - 1):
+        assert nr_mac.decode_pdsch_info(rec(0xB887, good[:cut])) is None, cut
+    assert nr_mac.decode_pdsch_info(rec(0xB887, good + b"\x00")) is None
+    assert diag(0xB887, good[:30]).decoded == "raw"
+    r = diag(0xB887, fx.nr_pdsch_info_body(3, 12))
+    assert r.decoded == "partial" and r.fields == {"version": "3.12"} and r.note == "version 3.12 not implemented; only 3.13 is"
+    assert nr_mac.summary_pdsch_info(r.fields) == "version 3.12 not implemented"
+
+
+def test_pdsch_info_implausible_pci_is_partial():
+    r = diag(0xB887, fx.nr_pdsch_info_body(3, 13, [fx.pdsch_slot(pci=1010), fx.pdsch_slot(pci=80)]))
+    assert r.decoded == "partial" and r.note.startswith("implausible: slot[0].pci; ")
+    assert r.fields["pci"] is None and dict(r.sections)["slots"][1]["pci"] == 80
+    assert nr_mac.summary_pdsch_info(r.fields) == "2 slots PCI n/a TBS 12302 bytes CRC fail 0"
 
 
 # --- the whole corpus through the Decoder --------------------------------------------------------
@@ -641,15 +807,34 @@ def test_nr_corpus_decodes_without_errors_and_every_record_is_kept():
     assert [d.body for d in diags] == [body for _c, _t, body in records]
     assert {d.decoded for d in diags} == {"fields", "partial"}
     assert report["coverage"]["0xB823"]["as"] == {"cell": 3}
-    assert report["coverage"]["0xB97F"]["as"] == {"fields": 2, "partial": 1}
-    assert report["coverage"]["0xB883"]["as"] == {"partial": 1}
+    assert report["coverage"]["0xB97F"]["as"] == {"fields": 3}
+    assert report["coverage"]["0xB887"]["as"] == {"fields": 1}
+    assert report["coverage"]["0xB80C"]["as"] == {"fields": 2}
+    assert report["coverage"]["0xB883"]["as"] == {"partial": 2}
+    assert report["coverage"]["0xB872"]["as"] == {"fields": 1, "partial": 1}
     for d in diags:
-        assert DOC in d.note or DOC in d.fields.get("layout_note", ""), d.summary()
+        note = d.note or d.fields.get("layout_note", "")
+        assert DOC in note or IPHONE in note or "not implemented" in note, d.summary()
         assert d.confidence == LOG_CODES[d.log_code].confidence
 
 
 def test_registry_names_every_nr_decoder():
     from fieldtap.decode.records import decoders
     table = decoders()
-    for code in (0xB822, 0xB823, 0xB80C, 0xB975, 0xB97F, 0xB888, 0xB883, 0xB872):
+    for code in (0xB822, 0xB823, 0xB80C, 0xB975, 0xB97F, 0xB887, 0xB888, 0xB883, 0xB872):
         assert LOG_CODES[code].decoder in table, hex(code)
+
+
+def test_every_summary_is_a_plain_line():
+    """The Info-column line of every NR record in the corpus: the Lua mirror prints the same
+    (tests/test_wireshark_nr_diag.py); here, that it exists and holds no identifier."""
+    summaries = {**nr_state.SUMMARIES, **nr_ml1.SUMMARIES, **nr_mac.SUMMARIES}
+    assert set(summaries) == {0xB80C, 0xB975, 0xB97F, 0xB887, 0xB888, 0xB883, 0xB872}
+    seen = set()
+    for code, _ts, body in fx.build_nr_corpus():
+        for obj in decode(code, body):
+            if isinstance(obj, DiagRecord) and code in summaries:
+                line = summaries[code](obj.fields)
+                assert line and "\n" not in line and "None" not in line and "0x" not in line, (hex(code), line)
+                seen.add(code)
+    assert seen == set(summaries)
