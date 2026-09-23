@@ -23,7 +23,8 @@ enum CaptureCoach {
     }
 }
 
-/// "I pressed the buttons" -> 20 s "Get ready" -> 20 s "Do it now" -> "Now wait for the sysdiagnose (up to 10 min)".
+/// "I pressed the buttons" -> 3 s "Get ready" -> "Do it now" until 12 s -> "Now wait for the sysdiagnose
+/// (up to 10 minutes)". The words under the ring are `CaptureWording.timing`, the one place the timing lives.
 struct CountdownPanel: View {
     var countdown: CaptureCountdown
     @Binding var notify: Bool
@@ -55,6 +56,11 @@ struct CountdownPanel: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 }
+                Text(CaptureWording.timing)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("countdownTiming")
                 Toggle(isOn: notifyBinding) {
                     Text("Notify me if I leave FieldTap").font(.subheadline)
                 }
@@ -95,15 +101,16 @@ struct CountdownPanel: View {
         switch p {
         case .getReady: "Get ready"
         case .doItNow: "Do it now"
-        case .waiting: "Now wait for the sysdiagnose (up to 10 min)"
+        case .waiting: "Now wait for the sysdiagnose (up to 10 minutes)"
         case .ready: "Your sysdiagnose should be ready"
         }
     }
 
     private func detail(_ p: CaptureCountdown.Phase) -> String {
         switch p {
-        case .getReady(let s): "Make the problem happen in \(s) seconds."
-        case .doItNow: "Make the problem happen now: place the call, open the app, or go to the spot."
+        case .getReady(let s): "Make the problem happen in \(s) seconds, and be finished within "
+            + "\(Int(CaptureCountdown.doItBySeconds)) seconds of the press."
+        case .doItNow: "Now: place the call, open the app, or go to the spot. Be finished before the ring empties."
         case .waiting: "You can use your iPhone meanwhile. It appears in Settings > Privacy & Security > Analytics & Improvements > Analytics Data."
         case .ready: "Share the newest sysdiagnose_… file to FieldTap."
         }
@@ -121,7 +128,7 @@ struct CountdownPanel: View {
         switch p {
         case .getReady(let s): Double(s) / CaptureCountdown.getReadySeconds
         case .doItNow(let s): Double(s) / CaptureCountdown.doItSeconds
-        case .waiting(let s): Double(s) / (CaptureCountdown.sysdiagnoseWaitSeconds - 40)
+        case .waiting(let s): Double(s) / (CaptureCountdown.sysdiagnoseWaitSeconds - CaptureCountdown.doItBySeconds)
         case .ready: 1
         }
     }

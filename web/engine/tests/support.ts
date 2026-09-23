@@ -1,6 +1,8 @@
 // Synthetic inputs for the tests: tar archives built byte by byte (ustar, GNU, pax, long names, base-256 sizes),
 // gzip through the platform's CompressionStream, and streams that deliver bytes in chosen or random splits.
-// Nothing here is capture-derived.
+// Nothing here is capture-derived, apart from openCapture, which only streams a capture the caller already has.
+
+import type { CaptureSource } from '../tools/fixtures.ts';
 
 export interface TarSpec {
   path: string;
@@ -244,4 +246,91 @@ export function buildBinaryPlist(root: BplistInput): Uint8Array {
   tv.setBigUint64(16, 0n);
   tv.setBigUint64(24, BigInt(at));
   return concat([header, ...objects, table, trailer]);
+}
+
+/**
+ * A capture taken with baseband logging OFF, invented end to end: an ambtool log that says so, one unrelated
+ * MDM profile stub, and no trace directory at all. It stands in for the 14-39-54 archive, which was never on
+ * this Mac, and for its extracted folder, which has since been deleted from ~/Downloads. Nothing here is
+ * capture-derived: the identifier is a reserved example domain and the dates are round numbers.
+ *
+ * `root` is the archive's top-level directory, whose name carries the button-press time.
+ */
+export function loggingOffFiles(root: string, installMs = Date.UTC(2026, 1, 3, 9, 0, 0)): TarSpec[] {
+  const stub = buildBinaryPlist({
+    InstallDate: { date: installMs },
+    PayloadDisplayName: 'Example Device Management',
+    PayloadIdentifier: 'com.example.mdm.settings',
+    PayloadVersion: 1,
+  });
+  return [
+    {
+      path: `${root}/logs/Baseband/ambtool_output.log`,
+      // ambtool's own wording when the profile is not installed.
+      data: new TextEncoder().encode('Baseband logs are not enabled\n'),
+    },
+    // The reader only takes 'profile-<hex>.stub' under logs/MCState/Shared, as the phone names them.
+    { path: `${root}/logs/MCState/Shared/profile-a1b2c3d4.stub`, data: stub },
+  ];
+}
+
+/**
+ * A tar of files read from disk, as a stream: each file is read only when the consumer pulls it, so a 133 MB
+ * trace never sits in memory at once. It feeds a capture that exists only as an extracted folder, which is how
+ * the real captures survive on a machine short of disk (the .tar.gz downloads get cleaned up).
+ *
+ * `path` is the name inside the tar, `from` the file on disk. Plain tar, not gzip: `readSysdiagnose` takes both.
+ */
+export function tarStreamOfFiles(files: readonly { path: string; from: string }[]): ReadableStream<Uint8Array> {
+  let i = 0;
+  return new ReadableStream({
+    pull(c) {
+      if (i >= files.length) {
+        c.enqueue(new Uint8Array(1024)); // the end-of-archive blocks
+        c.close();
+        return;
+      }
+      const f = files[i++];
+      let name = f.path, prefix = '';
+      if (enc.encode(name).length > 100) {
+        const cut = name.lastIndexOf('/');
+        prefix = name.slice(0, cut);
+        name = name.slice(cut + 1);
+      }
+      const data = Deno.readFileSync(f.from);
+      c.enqueue(header(name, data.length, '0', { path: f.path }, prefix));
+      if (data.length) c.enqueue(padded(data));
+    },
+  });
+}
+
+/**
+ * A capture as a stream, from its `.tar.gz` or from its extracted folder. Returns the byte total for the reading
+ * stage's progress: exact for an archive, and for a folder the tar's own size (headers plus padded bodies), which
+ * is what the reader will actually see.
+ */
+export function openCapture(source: CaptureSource): { stream: ReadableStream<Uint8Array>; totalBytes: number } {
+  if (source.kind === 'archive') {
+    return { stream: Deno.openSync(source.path).readable, totalBytes: Deno.statSync(source.path).size };
+  }
+  // Only the parts the reader wants: the Baseband tree (ambtool log, trace directories) and MCState/Shared.
+  const leaf = source.path.split('/').filter(Boolean).pop()!;
+  const files: { path: string; from: string }[] = [];
+  const walk = (rel: string) => {
+    for (const e of Deno.readDirSync(`${source.path}/${rel}`)) {
+      const next = `${rel}/${e.name}`;
+      if (e.isDirectory) walk(next);
+      else if (e.isFile) files.push({ path: `${leaf}/${next}`, from: `${source.path}/${next}` });
+    }
+  };
+  for (const dir of ['logs/Baseband', 'logs/MCState/Shared']) {
+    try {
+      walk(dir);
+    } catch {
+      // absent in this capture (a profile-off folder has no MCState): nothing to add
+    }
+  }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const totalBytes = files.reduce((n, f) => n + 512 + Math.ceil(Deno.statSync(f.from).size / 512) * 512, 1024);
+  return { stream: tarStreamOfFiles(files), totalBytes };
 }

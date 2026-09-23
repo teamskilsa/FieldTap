@@ -1,0 +1,374 @@
+@import "tailwindcss" source(none);
+@source "../src";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Geist and Geist Mono ship with the app (public/fonts), so nothing is fetched from a font CDN at runtime.
+   Both are variable fonts, so one file covers 400-600. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/geist-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/geist-mono-latin.woff2") format("woff2");
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@theme inline {
+  --color-signal-excellent: var(--good);
+  --color-signal-good: var(--good);
+  --color-signal-fair: var(--warning);
+  --color-signal-poor: var(--critical);
+  --color-band-1: var(--band-1);
+  --color-band-2: var(--band-2);
+  --color-band-3: var(--band-3);
+  --color-band-nr: var(--band-nr);
+  --color-band-other: var(--band-other);
+  --color-layer-rrc: var(--info);
+  --color-layer-nas: var(--seq-300);
+}
+
+:root {
+  --header-h: 48px;
+  --radius: 0.5rem;
+
+  --bg: oklch(0.976 0.003 264.5);
+  --surface-1: #ffffff;
+  --surface-2: oklch(0.963 0.005 258.3);
+  --surface-3: #ffffff;
+  --line: oklch(0.924 0.009 258.3);
+  --line-strong: oklch(0.865 0.014 258.3);
+  --text: oklch(0.177 0.011 260.6);
+  --text-2: oklch(0.440 0.026 259.2);
+  --text-3: oklch(0.535 0.025 256.8);
+  --action: #4f46e5;
+  --action-fg: #ffffff;
+  --good: #0ca30c;
+  --warning: #b27600;
+  --critical: #d03b3b;
+  --info: #1f6fd1;
+  --band-1: #2a78d6;
+  --band-2: #eb6834;
+  --band-3: #1baf7a;
+  --band-nr: #e87ba4;
+  --band-other: #8a93a1;
+  --seq-100: #cde2fb;
+  --seq-200: #86b6ef;
+  --seq-300: #3987e5;
+  --seq-400: #1c5cab;
+  --grid: var(--line);
+  --segment-tint: 16%;
+  --float-shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px rgb(16 24 40 / 0.12);
+
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface-1);
+  --card-foreground: var(--text);
+  --popover: var(--surface-3);
+  --popover-foreground: var(--text);
+  --primary: var(--action);
+  --primary-foreground: var(--action-fg);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-3);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--text);
+  --destructive: var(--critical);
+  --destructive-foreground: #ffffff;
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--action);
+  --chart-1: var(--seq-100);
+  --chart-2: var(--seq-200);
+  --chart-3: var(--seq-300);
+  --chart-4: var(--seq-400);
+  --chart-5: var(--band-3);
+  --sidebar: var(--surface-1);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--action);
+  --sidebar-primary-foreground: var(--action-fg);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--action);
+}
+
+.dark {
+  --bg: oklch(0.158 0.007 258.4);
+  --surface-1: oklch(0.190 0.009 255.6);
+  --surface-2: oklch(0.216 0.013 258.4);
+  --surface-3: oklch(0.251 0.019 262.2);
+  --line: oklch(0.288 0.020 260.6);
+  --line-strong: oklch(0.346 0.025 260.1);
+  --text: oklch(0.939 0.007 260.7);
+  --text-2: oklch(0.751 0.023 259.2);
+  --text-3: oklch(0.644 0.027 259.8);
+  --action: oklch(0.704 0.157 278.4);
+  --action-fg: oklch(0.158 0.007 258.4);
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #e66767;
+  --info: oklch(0.758 0.129 249.6);
+  --band-1: #3987e5;
+  --band-2: #d95926;
+  --band-3: #199e70;
+  --band-nr: #d55181;
+  --band-other: #7c8594;
+  --seq-100: #1c5cab;
+  --seq-200: #3987e5;
+  --seq-300: #86b6ef;
+  --seq-400: #cde2fb;
+  --grid: var(--line);
+  --segment-tint: 30%;
+  --float-shadow: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px var(--line);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    background: var(--bg);
+  }
+
+  body {
+    min-width: 0;
+    overflow-x: hidden;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--action) 30%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--action);
+    outline-offset: 2px;
+  }
+
+  img, svg, canvas, video {
+    max-width: 100%;
+  }
+
+  button, input, textarea, select {
+    font: inherit;
+  }
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@utility panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+@utility instrument-shadow {
+  box-shadow: var(--float-shadow);
+}
+
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  padding: 0.125rem 0.5rem;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+@layer components {
+  /* A quiet icon button. Every control carries a 2 px focus ring from the base layer. */
+  .icon-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: var(--text-2);
+    transition: background-color 120ms ease-out, color 120ms ease-out;
+  }
+  .icon-btn:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+
+  .btn-quiet {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface-2);
+    padding: 0.25rem 0.5rem;
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 16px;
+    transition: background-color 120ms ease-out, color 120ms ease-out;
+  }
+  .btn-quiet:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  /* The capture tab bar: quiet text tabs with a 2 px accent underline on the active one. */
+  .tab-trigger {
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    box-shadow: none;
+    padding-inline: 0.625rem;
+    color: var(--text-3);
+    font-size: 13px;
+    transition: color 120ms ease-out, border-color 120ms ease-out;
+  }
+  .tab-trigger:hover {
+    color: var(--text);
+  }
+  .tab-trigger[data-state="active"] {
+    border-bottom-color: var(--action);
+    background: transparent;
+    box-shadow: none;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  /* Visible only once focused, which is the point. */
+  .skip-link {
+    position: fixed;
+    top: -100px;
+    left: 0.75rem;
+    z-index: 80;
+    border-radius: 6px;
+    background: var(--action);
+    padding: 0.5rem 0.75rem;
+    color: var(--action-fg);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .skip-link:focus-visible {
+    top: 0.75rem;
+  }
+  .skip-link-2:focus-visible {
+    top: 3.5rem;
+  }
+}
+
+@utility axis-text {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+
+@keyframes fieldtap-shimmer {
+  0% { background-position: -240px 0; }
+  100% { background-position: 240px 0; }
+}
+
+@utility shimmer {
+  background-image: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
+  background-size: 240px 100%;
+  animation: fieldtap-shimmer 1.2s ease-in-out infinite;
+}
+
+/* "Show on timeline": a 900 ms pulse on the moment the rest of the app just pointed at, so the eye finds it
+   without hunting for the cursor. Reduced motion keeps the ring and drops the animation. */
+@keyframes fieldtap-flash {
+  0%   { opacity: 0; box-shadow: inset 0 0 0 2px var(--action); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; box-shadow: inset 0 0 0 10px color-mix(in oklab, var(--action) 0%, transparent); }
+}
+
+@layer components {
+  .marker-flash {
+    background: color-mix(in oklab, var(--action) 18%, transparent);
+    box-shadow: inset 0 0 0 2px var(--action);
+    animation: fieldtap-flash 900ms ease-out 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

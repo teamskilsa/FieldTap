@@ -341,6 +341,86 @@ Deno.test('random synthetic traces: whole chunks and 10 random splits of them gi
   for (let seed = 1; seed <= 10; seed++) assertEquals(fingerprint(run((c, i) => randomPieces(c, seed * 100 + i, 1 + seed * 997))), want, `split ${seed}`);
 });
 
+// ------------------------------------------------------------------------------------------------- resync
+
+/** Record bodies whose bytes never look like a unit tag (low 5 bits 0x00, 0x02, 0x03 or 0x13), as real modem
+ *  payload mostly does not. Read out of phase they fail the tag check at once, which is what the slip detector
+ *  keys on; uniform random bytes would pass it one time in eight and hide the slip. */
+function payload(seed: number, n: number): Uint8Array {
+  const r = rng(seed);
+  const low = [1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31];
+  return Uint8Array.from({ length: n }, () => (Math.floor(r() * 8) << 5) | low[Math.floor(r() * low.length)]);
+}
+
+/** A run of whole (kind 1) fragments on one channel, each carrying one log packet, as raw units. */
+function logUnits(from: number, count: number, lane = 0): Uint8Array[] {
+  const out: Uint8Array[] = [channelUnit(lane, 0x150 + lane)];
+  for (let i = 0; i < count; i++) {
+    for (const u of fragmentUnits({ lane, kind: 1, payload: logPacket(0xb0c0 + i % 3, ts2026(from + i), payload(from + i, 120)) })) out.push(u);
+  }
+  return out;
+}
+
+/** The codes and stamps of a run's records, to check which survived. */
+const recordKeys = (out: DeframeOutput) => out.records.map((r) => `${r.code}@${r.timestampRaw}`);
+
+Deno.test('resync: a phase slip mid-stream is found and the records after it are recovered', () => {
+  // Two runs of the same length, the second written 5 bytes out of phase with the first.
+  const before = concat(logUnits(0, 40));
+  const after = concat(logUnits(100, 40));
+  const slipped = deframe(concat([before, bytes(7, 5), after]));
+  const aligned = deframe(concat([before, after]));
+  const keys = new Set(recordKeys(slipped));
+
+  assertEquals(slipped.stats.stats['resync_slip'], 1, 'one slip, found once');
+  assertEquals(slipped.stats.stats['resync_new_phase'], 1, 'and a different phase after it');
+  assertEquals(slipped.stats.stats['chunk_gaps'], undefined, 'no chunk gap here');
+  // Everything before the slip, and everything after it bar the fragments the 8-unit detection ran over.
+  assertEquals(recordKeys(aligned).filter((k) => keys.has(k)).length >= 70, true, `${keys.size} of 80 records`);
+  assert(recordKeys(aligned).slice(0, 40).every((k) => keys.has(k)), 'every record before the slip');
+  assert(recordKeys(aligned).slice(-20).every((k) => keys.has(k)), 'the records well past the slip');
+});
+
+Deno.test('resync: gap() re-finds the phase across a hole, and is split-invariant', () => {
+  const first = formatFrames([{ id: DIAG_ATID, bytes: concat(logUnits(0, 40)) }]);
+  // The chunk after the hole begins 9 bytes out of phase with the one before it.
+  const second = formatFrames([{ id: DIAG_ATID, bytes: concat([bytes(3, 9), ...logUnits(200, 40)]) }]);
+  const run = (split: (c: Uint8Array) => Uint8Array[]) => {
+    const d = new QdssDeframer({ index: true });
+    for (const p of split(first)) d.feed(p);
+    d.endChunk();
+    d.gap();
+    for (const p of split(second)) d.feed(p);
+    d.endChunk();
+    return d.finish();
+  };
+  const whole = run((c) => [c]);
+  assertEquals([whole.stats.stats['chunk_gaps'], whole.stats.stats['resync_gap']], [1, 1]);
+  assertEquals(whole.records.length, 80, 'both chunks recovered in full');
+  // The decision waits for its window, so it cannot depend on how the bytes arrived.
+  const want = fingerprint(whole);
+  for (let seed = 1; seed <= 8; seed++) assertEquals(fingerprint(run((c) => randomPieces(c, seed, 1 + seed * 131))), want, `split ${seed}`);
+
+  // Without gap(), the slip detector finds the same hole on its own, a few fragments later.
+  const d = new QdssDeframer();
+  d.feed(first);
+  d.endChunk();
+  d.feed(second);
+  d.endChunk();
+  const unsignalled = d.finish();
+  assertEquals(unsignalled.stats.stats['chunk_gaps'], undefined);
+  assertEquals(unsignalled.stats.stats['resync_slip'], 1);
+  assert(unsignalled.records.length > 70, `${unsignalled.records.length} records without gap()`);
+});
+
+Deno.test('resync: a long damaged stretch always moves forward and never loops', () => {
+  const out = deframe(concat([concat(logUnits(0, 20)), bytes(5, 40_000), concat(logUnits(300, 20))]));
+  assert((out.stats.stats['resync_slip'] ?? 0) > 0, 'the garbage is noticed');
+  // The runs on both sides of the garbage still come out.
+  assertEquals(out.records.filter((r) => r.timestampRaw < ts2026(100)).length, 20, 'the run before it');
+  assert(out.records.some((r) => r.timestampRaw >= ts2026(300)), 'and the run after it');
+});
+
 Deno.test('lifecycle: an unended chunk is ended at finish, an empty chunk counts, nothing is accepted after finish', () => {
   const d = new QdssDeframer();
   d.endChunk();

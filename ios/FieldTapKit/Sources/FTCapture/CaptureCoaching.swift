@@ -1,20 +1,25 @@
 import Foundation
 import FTModel
 
-/// The capture coaching's timing (R2). One capture showed the modem keeps its trace live after the button
-/// press, not before it: the kept trace covered 19-46 s after the press and only about 8 MiB (about 1.6 s) was
-/// buffered before it. So the user presses first, reproduces the problem 20-40 s later, and then waits for the
-/// sysdiagnose. These numbers come from early tests; the app says so.
+/// The capture coaching's timing (R2), measured on both of the user's captures: the sysdiagnose dumps the
+/// modem log about 19 s after the button press (46 s when the phone had just restarted and was still busy) and
+/// keeps only the last ~128 MiB of it, about 22-28 s of trace. The kept window of the second capture therefore
+/// ran from 4 s *before* the press to 19 s after it. So the user presses first, does the thing a few seconds
+/// later and is finished well before the dump; `CaptureWording.timing` is that advice in words.
 public struct CaptureCountdown: Hashable, Codable, Sendable {
-    public static let getReadySeconds: TimeInterval = 20
-    public static let doItSeconds: TimeInterval = 20
+    /// "Get ready", while the user puts the phone down and gets to the button.
+    public static let getReadySeconds: TimeInterval = 3
+    /// "Do it now", to the end of the useful window.
+    public static let doItSeconds: TimeInterval = 9
+    /// Be finished by here: the dump comes about 19 s after the press and keeps what came before it.
+    public static var doItBySeconds: TimeInterval { getReadySeconds + doItSeconds }
     /// Apple: a sysdiagnose can take up to 10 minutes to appear in Analytics Data.
     public static let sysdiagnoseWaitSeconds: TimeInterval = 600
 
     public enum Phase: Hashable, Sendable {
-        /// 0-20 s after the press.
+        /// 0-3 s after the press.
         case getReady(secondsLeft: Int)
-        /// 20-40 s after the press: reproduce the problem now.
+        /// 3-12 s after the press: do the thing now.
         case doItNow(secondsLeft: Int)
         /// Until 10 minutes after the press.
         case waiting(secondsLeft: Int)
@@ -52,6 +57,14 @@ public struct CaptureCountdown: Hashable, Codable, Sendable {
 
 /// Plain-words strings the capture screens share, kept here so they are tested.
 public enum CaptureWording {
+    /// The capture timing, in the words the guide, the countdown and every help text use. It lives here alone:
+    /// no screen writes its own seconds. See `CaptureCountdown` for where the numbers come from.
+    public static let timing = """
+        Press the buttons first, then do the thing about 3 to 5 seconds later and be finished by about \
+        12 seconds. If it has already happened, press within 2 to 3 seconds. When your iPhone has been sitting \
+        idle, the trace reaches back minutes.
+        """
+
     /// "0:19", "1:05"; whole seconds, rounded down.
     public static func minutesSeconds(_ seconds: Double) -> String {
         let s = max(0, Int(seconds.rounded(.down)))

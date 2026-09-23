@@ -4,8 +4,8 @@ import FTApp
 import FTModel
 import FTPhy
 
-/// LTE serving-cell signal from 0xB193: RSRP per Rx antenna and filtered, RSRQ, RSSI, the Rx0-Rx1 imbalance,
-/// every serving carrier's filtered RSRP, and the neighbours the modem measured.
+/// LTE serving-cell signal from 0xB193: RSRP per Rx antenna and filtered, RSRQ, RSSI, the Rx0-Rx1 imbalance and
+/// every serving carrier's filtered RSRP. The neighbours are their own section (NeighboursSection).
 struct SignalSection: View {
     @Bindable var session: CaptureSession
     @State private var shownRx: Set<Int> = [0, 1, 2, 3]
@@ -26,7 +26,6 @@ struct SignalSection: View {
             lineChart("RSSI", "dBm", .lte_rssi, window)
             imbalanceChart(perRx, window)
             carriersChart(window)
-            neighbourChart(window)
         }
     }
 
@@ -138,38 +137,4 @@ struct SignalSection: View {
     }
 
     private func carrierIndex(_ name: String) -> Int { name == "PCell" ? 0 : Int(name.dropFirst(6)) ?? 0 }
-
-    /// Neighbour RSRP as points, one colour and shape per PCI (in the order the PCIs first appear).
-    private func neighbourChart(_ window: ClosedRange<Double>) -> some View {
-        let samples = RadioData.series(phy, .lte_neighbour_rsrp)
-        let pcis = orderedPcis(samples)
-        let pts = RadioData.points(samples, window: window, series: "n", group: { "PCI \($0.pci ?? -1)" })
-        return VStack(alignment: .leading, spacing: 6) {
-            PhyChart(title: "Neighbour RSRP", unit: "dBm", empty: samples.isEmpty ? "No neighbour measurements in this capture." : nil,
-                     session: session) {
-                ForEach(pts) { p in
-                    PointMark(x: .value("t", p.t), y: .value("RSRP", p.y))
-                        .foregroundStyle(pciColor(p.group, pcis))
-                        .symbol(pciShape(p.group, pcis))
-                        .symbolSize(18)
-                }
-            }
-            LegendRow(items: pcis.map { ($0, pciColor($0, pcis)) })
-        }
-    }
-
-    private func orderedPcis(_ samples: [PhySample]) -> [String] {
-        var seen: [String] = []
-        for s in samples { let k = "PCI \(s.pci ?? -1)"; if !seen.contains(k) { seen.append(k) } }
-        return seen
-    }
-
-    private func pciColor(_ key: String, _ order: [String]) -> Color {
-        guard let i = order.firstIndex(of: key), i < RadioStyle.points.count else { return RadioStyle.other }
-        return RadioStyle.points[i]
-    }
-
-    private func pciShape(_ key: String, _ order: [String]) -> BasicChartSymbolShape {
-        RadioStyle.shapes[(order.firstIndex(of: key) ?? 0) % RadioStyle.shapes.count]
-    }
 }

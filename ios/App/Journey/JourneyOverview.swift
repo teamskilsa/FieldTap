@@ -65,6 +65,9 @@ struct OverviewPage: View {
             .padding(.top, 14)
             .padding(.bottom, 24)
         }
+        // The floating cursor bar is laid out as a safe-area inset, but its glass is rounded and inset, so the
+        // last row needs a little more room than the inset gives it (CapturePageLayout).
+        .contentMargins(.bottom, CapturePageLayout.scrollBottomInset, for: .scrollContent)
         .background(Color(.systemGroupedBackground))
         .journeyStripCollapses(with: session)
         .onAppear { scrollForLaunch(reader) }
@@ -378,6 +381,16 @@ private struct CaptureFactsCard: View {
             if let o = s.overwrittenFiles, o > 0 {
                 row("Overwritten", "\(o) older trace file\(o == 1 ? " was" : "s were") overwritten before the dump"
                     + (s.listedFiles.map { " (\($0 - o) of \($0) kept)" } ?? ""))
+            }
+            // What the modem's own 1024 Hz clock (0x1D0B) says the trace does not contain. The record rate falls
+            // across a detach, and this is how much wall time went missing there, in seconds rather than "some
+            // messages may be incomplete".
+            if let gaps = analysis.phy.summary.traceGaps, !gaps.isEmpty {
+                let longest = gaps.max { $0.missingMs < $1.missingMs }!
+                row("Missing", "\(JourneyText.seconds(analysis.phy.summary.missingTraceMs)) was never written, in "
+                    + "\(gaps.count) gap\(gaps.count == 1 ? "" : "s") "
+                    + "(the longest \(JourneyText.seconds(longest.missingMs)) at \(JourneyText.clock(longest.tMs))). "
+                    + "Measured on the modem's own clock, so messages in those seconds are simply absent.")
             }
             row("Records", "\(JourneyText.count(s.deframe?.logRecords ?? analysis.flow.records)) records"
                 + ((s.deframe?.distinctCodes).map { ", \($0) log codes" } ?? ""))

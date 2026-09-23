@@ -143,6 +143,7 @@ public final class AppModel {
             if let page = route.page { session.page = page }
             if let filter = plan.filter { session.filter = filter }
             if let section = plan.radioSection { session.radioSection = section }
+            if let entry = plan.radioEntry { session.radioEntry = entry }
             if let ms = plan.cursorMs { session.cursor.set(ms) }
             if let event = plan.event {
                 if route == .message { session.select(event: event) } else if plan.cursorMs == nil,

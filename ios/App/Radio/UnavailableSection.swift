@@ -15,8 +15,11 @@ struct UnavailableSection: View {
         VStack(alignment: .leading, spacing: 16) {
             SectionHeader(title: "Not available", source: "What this iPhone's modem does not log in plain form, what FieldTap does not decode yet, and decoder health",
                           session: session) { _ in Self.health(phy) }
-            list("Not possible on this iPhone", "nosign", entries.filter { PhyCatalog.notPossibleIds.contains($0.id) })
-            list("Not decoded yet", "hourglass", entries.filter { !PhyCatalog.notPossibleIds.contains($0.id) })
+            list("Not possible on this iPhone", "nosign",
+                 entries.filter { PhyCatalog.notPossibleIds.contains($0.id) && $0.status != .excludedForPrivacy })
+            list("Excluded on purpose", "hand.raised.fill", entries.filter { $0.status == .excludedForPrivacy })
+            list("Not decoded yet", "hourglass",
+                 entries.filter { !PhyCatalog.notPossibleIds.contains($0.id) && $0.status != .excludedForPrivacy })
             DecoderHealthView(phy: phy)
         }
     }
@@ -33,7 +36,10 @@ struct UnavailableSection: View {
         return out
     }
 
-    private func list(_ title: String, _ symbol: String, _ items: [Availability]) -> some View {
+    @ViewBuilder private func list(_ title: String, _ symbol: String, _ items: [Availability]) -> some View {
+        if items.isEmpty {
+            EmptyView()
+        } else {
         VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: symbol).font(.headline)
             VStack(alignment: .leading, spacing: 0) {
@@ -51,11 +57,13 @@ struct UnavailableSection: View {
                         }
                     }
                     .padding(10)
+                    .id(a.id)
                     .accessibilityElement(children: .combine)
                     if a.id != items.last?.id { Divider().padding(.leading, 10) }
                 }
             }
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        }
         }
     }
 
@@ -66,6 +74,7 @@ struct UnavailableSection: View {
         case .notFoundInPlainLogs: "not in plain logs"
         case .encryptedByModem: "encrypted by the modem"
         case .notOnIPhone: "not on iPhone"
+        case .excludedForPrivacy: "excluded on purpose"
         }
     }
 }

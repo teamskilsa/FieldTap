@@ -1,4 +1,5 @@
 import SwiftUI
+import FTCapture
 import FTModel
 
 /// One step of a customer-facing guide: an SF Symbol picture, a short title, plain words, one primary button and
@@ -72,18 +73,21 @@ enum GuideContent {
         return 0
     }
 
-    /// Recording a problem (R2): press first, reproduce 20-40 s later, wait, share.
+    /// Recording a problem (R2): press first, do the thing a few seconds later, wait, share. Every timing on
+    /// these cards is `CaptureWording.timing`, so the guide, the countdown and the help sheets never disagree.
     static let capture: [GuideStep] = [
         GuideStep(id: "press", symbol: "hand.tap", title: "Press the buttons first",
-                  text: "Press both volume buttons and the side button together, briefly, until you feel a short buzz. Do this before the problem: in early tests your iPhone kept only about 27 seconds of modem trace, all after the press.",
+                  text: "Press both volume buttons and the side button together, briefly, until you feel a short buzz. "
+                      + "Press before the problem, not after it — the next step says when.",
                   button: "I pressed the buttons", action: .startCountdown,
                   trouble: [.init(problem: "No buzz?",
                                   fix: "Press all three at the same moment and let go right away. Holding them down starts Emergency SOS, so don't hold them.")]),
         GuideStep(id: "reproduce", symbol: "phone.arrow.up.right", title: "Then make the problem happen",
-                  text: "About 20 to 40 seconds after the buzz, do the thing that goes wrong: place the call, open the app, or go to the spot where it fails.",
+                  text: "Do the thing that goes wrong: place the call, open the app, or go to the spot where it fails. "
+                      + CaptureWording.timing,
                   button: "Next", action: .next,
                   trouble: [.init(problem: "Missed the moment?",
-                                  fix: "Start again: press the buttons, wait 20 seconds, then try it. The countdown in FieldTap can time it for you.")]),
+                                  fix: "Press the buttons again and start over. The countdown in FieldTap can time it for you.")]),
         GuideStep(id: "wait", symbol: "hourglass", title: "Wait for the sysdiagnose",
                   text: "Your iPhone takes up to 10 minutes to finish it. You can use your phone meanwhile.",
                   button: "Next", action: .next,

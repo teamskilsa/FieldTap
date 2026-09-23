@@ -18,11 +18,39 @@ export const VALIDATED_VERSIONS: Readonly<Record<string, string>> = {
   '0xB97F': '3.0',
   '0xB887': '3.13',
   '0xB888': '3.1',
+  '0xB126': '163',
+  '0xB12A': '161',
+  '0xB16C': '50',
+  '0xB179': '56',
+  '0xB063': '50',
+  '0x184C': '17',
+  '0x1D0B': '7',
 };
 
 /** The codes the extractor decodes, in the reference extractor's order (which fixes the series' sample order). */
 export const PHY_CODES: readonly number[] = [
-  0xb0c1, 0xb0c2, 0xb193, 0xb173, 0xb139, 0xb14e, 0xb14d, 0xb064, 0xb062, 0xb97f, 0xb887, 0xb888,
+  0xb0c1,
+  0xb0c2,
+  0xb193,
+  0xb173,
+  0xb139,
+  0xb14e,
+  0xb14d,
+  0xb064,
+  0xb062,
+  0xb97f,
+  0xb887,
+  0xb888,
+  // Added after the first twelve, so the existing series keep their sample order. Each of these is checked
+  // against one of the twelve, which is why they come second: 0xB173's transport blocks and 0xB139's PUSCH
+  // reports are already on the TTI axis by the time they are read.
+  0xb126,
+  0xb12a,
+  0xb16c,
+  0xb063,
+  0x184c,
+  0x1d0b,
+  0xb179,
 ];
 
 export interface PhyMetricInfo {
@@ -41,7 +69,9 @@ const info = (
   section: PhySection,
   confidence: PhyConfidence = 'high',
   badges?: string[],
-): PhyMetricInfo => (badges ? { title, unit, code, section, confidence, badges } : { title, unit, code, section, confidence });
+): PhyMetricInfo => (badges
+  ? { title, unit, code, section, confidence, badges }
+  : { title, unit, code, section, confidence });
 
 /** 0xB14D's CQI/PMI/RI bit positions are re-derived, and its samples share these series with 0xB14E's. */
 const CSI_MERGED = ['medium confidence'];
@@ -75,7 +105,10 @@ export const PHY_METRICS: Readonly<Record<PhyMetric, PhyMetricInfo>> = {
   lte_ul_tbs: info('UL TBS', 'bytes', '0xB139', 'uplink'),
   lte_ul_modulation: info('UL modulation', 'Qm', '0xB139', 'uplink'),
   lte_ul_code_rate: info('UL code rate', 'ratio', '0xB139', 'uplink'),
-  lte_pusch_tx_power_required: info('PUSCH power required', 'dBm', '0xB139', 'uplink', 'medium', ['before Pcmax', 'medium confidence']),
+  lte_pusch_tx_power_required: info('PUSCH power required', 'dBm', '0xB139', 'uplink', 'medium', [
+    'before Pcmax',
+    'medium confidence',
+  ]),
   lte_ul_mcs_derived: info('UL MCS', 'index', '0xB139', 'uplink', 'derived', ['derived']),
   // Scheduled PUSCH TBS per second, retransmissions included: what the network granted, not goodput.
   lte_ul_phy_throughput: info('UL scheduled per 1 s', 'Mbit/s', '0xB139', 'uplink', 'high', ['UL scheduled']),
@@ -97,6 +130,30 @@ export const PHY_METRICS: Readonly<Record<PhyMetric, PhyMetricInfo>> = {
   nr_dl_crc_ok: info('NR DL CRC pass', 'bool', '0xB887', 'nr'),
   nr_dl_bler: info('NR DL BLER', '%', '0xB888', 'nr'),
   nr_dl_mac_throughput: info('NR MAC DL throughput', 'Mbit/s', '0xB888', 'nr', 'high', ['MAC']),
+  // 0xB126: the measured antenna answer, the rank and the PRB allocation bitmap, 20 subframes per record.
+  lte_pdsch_tx_antennas: info('Transmit antenna ports (measured)', 'count', '0xB126', 'antennas'),
+  lte_pdsch_rx_antennas: info('Receive antennas in use', 'count', '0xB126', 'antennas', 'medium', [
+    'medium confidence',
+  ]),
+  lte_dl_rank: info('DL rank per subframe', 'layers', '0xB126', 'downlink'),
+  lte_dl_prb_allocation: info('DL PRB allocation', 'PRB', '0xB126', 'downlink'),
+  // 0xB12A: the cell's control-channel load, which does not depend on this phone's traffic.
+  lte_pdcch_cfi: info('PDCCH symbols (CFI)', 'symbols', '0xB12A', 'downlink'),
+  // 0xB16C: the scheduler's decisions. The downlink assignment's contents are rejected, so only its count is read.
+  lte_dl_assignments: info('DL assignments per subframe', 'count', '0xB16C', 'downlink'),
+  lte_ul_grant_prb: info('UL grant PRB', 'PRB', '0xB16C', 'uplink'),
+  lte_ul_grant_start_rb: info('UL grant start RB', 'RB', '0xB16C', 'uplink'),
+  // 0xB179: the neighbours nothing else in the capture measures, and the margin that explains a handover.
+  lte_neighbour_rsrp_intra: info('Neighbour RSRP (intra-frequency)', 'dBm', '0xB179', 'signal'),
+  lte_neighbour_rsrq_intra: info('Neighbour RSRQ (intra-frequency)', 'dB', '0xB179', 'signal'),
+  lte_neighbour_margin: info('Handover margin', 'dB', '0xB179', 'signal'),
+  // 0x184C: the front end's own transmit power, which is what says whether the phone was transmit-limited.
+  lte_fed_tx_power: info('Front-end Tx power', 'dBm', '0x184C', 'uplink', 'medium', ['front-end', 'medium confidence']),
+  lte_fed_tx_limit: info('Front-end Tx limit', 'dBm', '0x184C', 'uplink', 'medium', ['medium confidence']),
+  lte_pa_gain_state: info('PA gain state', 'state', '0x184C', 'uplink', 'medium', ['medium confidence']),
+  // 0xB063: accounting, never the total (the walk reaches about 80% of the declared transport blocks).
+  lte_mac_dl_bytes: info('MAC DL bytes per 1 s', 'bytes', '0xB063', 'downlink', 'high', ['partial coverage']),
+  lte_mac_dl_padding: info('MAC DL padding per 1 s', 'bytes', '0xB063', 'downlink', 'high', ['partial coverage']),
 };
 
 export const PHY_METRIC_ORDER = Object.keys(PHY_METRICS) as PhyMetric[];
@@ -113,4 +170,8 @@ export const TAG = {
   txDiversity: 'TxD',
   /** 3 layers: seen in 2 records of the first capture, while RI never exceeded 2. */
   unverified: 'unverified',
+  /** 0x184C: the chain was not transmitting (the -70.0 dBm sentinel). */
+  chainOff: 'off',
+  /** 0x184C: a live chain sitting within 0.5 dB of its own power limit. */
+  atLimit: 'at limit',
 } as const;

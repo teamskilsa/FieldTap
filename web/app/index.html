@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FieldTap Log Analyzer</title>
+    <meta name="description" content="Read your iPhone's modem log in your browser — nothing is uploaded." />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <!-- Geist is served from public/fonts, not Google Fonts: the app makes no network request at runtime. -->
+    <link rel="preload" href="/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/geist-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- The theme is set before the first paint, so there is no flash of the light theme (audit A22). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('fieldtap.theme') || 'system';
+          var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.dataset.theme = t;
+        } catch (e) {
+          /* private mode: fall back to the light theme */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

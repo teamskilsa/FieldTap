@@ -47,6 +47,8 @@ public final class CaptureSession: Identifiable, Hashable {
     public var visibleWindow: ClosedRange<Double>
     /// The Radio page's section chip ("signal", "dl", ...), owned by WP4's RadioPage.
     public var radioSection: String?
+    /// A catalogue entry the Not available list should scroll to (screenshots; -FTRadioEntry).
+    public var radioEntry: String?
     /// Identifiers shown for this session (only after the Settings confirmation).
     public var reveal: Bool
 
@@ -54,9 +56,18 @@ public final class CaptureSession: Identifiable, Hashable {
         id = analysis.summary.id
         self.analysis = analysis
         let duration = analysis.durationMs
-        cursor = TimeCursor(durationMs: duration)
+        cursor = TimeCursor(durationMs: duration, ms: Self.openingCursorMs(analysis))
         visibleWindow = 0...max(duration, 1)
         self.reveal = reveal
+    }
+
+    /// Where a capture opens: the first moment that has a serving cell, so the header names a cell instead of
+    /// reading "No serving cell yet" with a dash in every row. That is the first PCell segment's start; without
+    /// cells, the first event; without either, the start of the trace. The cursor then lives in the session, so
+    /// moving between Overview, Call flow and Radio keeps whatever the user last looked at.
+    public static func openingCursorMs(_ analysis: CaptureAnalysis) -> Double {
+        let pcell = analysis.journey.cells.filter { $0.lane == .pcell }.map(\.startMs).min()
+        return pcell ?? analysis.flow.events.first?.sinceStartMs ?? 0
     }
 
     public var durationMs: Double { analysis.durationMs }

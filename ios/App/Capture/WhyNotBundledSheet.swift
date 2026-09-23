@@ -1,4 +1,5 @@
 import SwiftUI
+import FTCapture
 import FTModel
 
 /// Why Apple's Baseband profile can't ship inside FieldTap, and what the app does instead (the design's
@@ -27,7 +28,7 @@ struct WhyNotBundledSheet: View {
                     ])
                     section("What FieldTap does instead", [
                         "One button opens Apple's Profiles and Logs page in Safari. Sign in with your Apple Account, tap Baseband, allow the download, then install it in Settings.",
-                        "Press both volume buttons and the side button first, then make the problem happen about 20 to 40 seconds later: in early tests the modem kept only about 27 seconds of trace, starting about 19 seconds after the press.",
+                        "Press both volume buttons and the side button, then make the problem happen. " + CaptureWording.timing,
                         "Wait up to 10 minutes, then share the sysdiagnose from Analytics Data to FieldTap.",
                         "Each import reads the profile record in the archive, shows when it expires, can remind you a day before, and tells you plainly when there's no modem trace.",
                     ])

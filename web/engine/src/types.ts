@@ -546,7 +546,25 @@ export type PhyMetric =
   | 'nr_dl_modulation'
   | 'nr_dl_crc_ok'
   | 'nr_dl_bler'
-  | 'nr_dl_mac_throughput';
+  | 'nr_dl_mac_throughput'
+  // Added with the 0xB126, 0xB12A, 0xB16C, 0xB179, 0xB063 and 0x184C decoders (see PHY_METRICS for each one's
+  // record, unit and confidence).
+  | 'lte_pdsch_tx_antennas'
+  | 'lte_pdsch_rx_antennas'
+  | 'lte_dl_rank'
+  | 'lte_dl_prb_allocation'
+  | 'lte_pdcch_cfi'
+  | 'lte_dl_assignments'
+  | 'lte_ul_grant_prb'
+  | 'lte_ul_grant_start_rb'
+  | 'lte_neighbour_rsrp_intra'
+  | 'lte_neighbour_rsrq_intra'
+  | 'lte_neighbour_margin'
+  | 'lte_fed_tx_power'
+  | 'lte_fed_tx_limit'
+  | 'lte_pa_gain_state'
+  | 'lte_mac_dl_bytes'
+  | 'lte_mac_dl_padding';
 
 export type PhySection = 'signal' | 'downlink' | 'uplink' | 'csi' | 'nr' | 'antennas' | 'rach';
 
@@ -568,6 +586,8 @@ export interface PhySample {
   cell?: Cell | undefined;
   /** 'CW1', '256QAM', 'retx', a neighbour PCI... */
   tag?: string | undefined;
+  /** A bitmap the record carries, low word first: bit k of word w is item 32w + k (0xB126's PRB allocation). */
+  mask?: number[] | undefined;
 }
 
 export interface PhySeries {
@@ -606,6 +626,144 @@ export interface RachEvent {
   preambleTargetDbm?: number | undefined;
 }
 
+/**
+ * The antenna configuration measured per serving cell from the PDSCH demapper configuration (0xB126), as opposed
+ * to inferred from the MIB broadcast: `txPorts` is the cell's transmit antenna ports and `rxAntennas` the antennas
+ * the phone had in use. The record does not name its cell, so the serving cell of the moment is attributed from
+ * the 0xB193 serving records; `mibTxAntennas` is the broadcast's own figure for the same cell, where it was seen.
+ */
+export interface AntennaConfig {
+  earfcn: number;
+  pci: number;
+  txPorts: number;
+  rxAntennas: number;
+  /** Subframes this configuration was measured in. */
+  subframes: number;
+  mibTxAntennas?: number | undefined;
+  /** The MIMO rank measured on this cell: rank -> subframes. */
+  rankHistogram: Record<string, number>;
+  source: string;
+}
+
+/**
+ * One intra-frequency neighbour cell measured by 0xB179, over the whole capture. The handover margin is the
+ * neighbour's RSRP less the serving cell's in the *same record*, so a positive margin means the neighbour was the
+ * stronger cell at that instant: that is the answer to "why did it not hand over".
+ */
+export interface NeighbourCell {
+  earfcn: number;
+  pci: number;
+  measurements: number;
+  rsrpBestDbm: number;
+  rsrpMedianDbm: number;
+  rsrqMedianDb: number;
+  /** The best (largest) and the median margin against the serving cell, in dB. */
+  marginBestDb: number;
+  marginMedianDb: number;
+  firstMs: number;
+  lastMs: number;
+  /** True when this PCI is measured by no other record in the capture (0xB193 never reports it). */
+  onlySource: boolean;
+}
+
+/** One LCID's share of the downlink MAC bytes 0xB063 accounts for (TS 36.321 table 6.2.1-1). */
+export interface MacDlChannel {
+  lcid: number;
+  /** 'signalling' (LCID 1-2), 'data' (3-10), 'control' (a MAC control element), 'broadcast' (LCID 0), or 'other'
+   *  for an LCID that is not a 3GPP downlink channel (the walk's own uncertainty; never counted as user data). */
+  kind: 'signalling' | 'data' | 'control' | 'broadcast' | 'other';
+  name: string;
+  bytes: number;
+  sdus: number;
+}
+
+/**
+ * MAC-level downlink accounting from 0xB063. It is never the total: the walk over the PDCP tails reaches only
+ * `coverageShare` of the transport blocks the records declare, so `bytes` is a floor and 0xB173 remains the
+ * throughput source.
+ */
+export interface MacDlAccounting {
+  records: number;
+  declaredBlocks: number;
+  walkedBlocks: number;
+  /** walkedBlocks / declaredBlocks: the explicit coverage figure this view must be read with. */
+  coverageShare: number;
+  /** Records whose walk ended exactly on the last byte of the body. */
+  exactWalks: number;
+  bytes: number;
+  paddingBytes: number;
+  paddingShare: number;
+  channels: MacDlChannel[];
+  /** Timing-advance commands seen (LCID 29). Their 6-bit value is not in the record. */
+  timingAdvanceCommands: number;
+}
+
+/** One transmit chain of the front end (0x184C), over the whole capture. */
+export interface TxChain {
+  /** The record's own chain tag, as hex ('0x10'). */
+  chain: string;
+  samples: number;
+  /** Samples where the chain was transmitting (not the -70.0 dBm off sentinel). */
+  liveSamples: number;
+  maxPowerDbm: number;
+  medianPowerDbm: number;
+  /** The chain's own binding power limit in dBm, where it was logged. */
+  limitDbm?: number | undefined;
+  /** Live samples within 0.5 dB of the limit. */
+  atLimitSamples: number;
+  /** Distinct PA gain states seen. */
+  gainStates: number[];
+}
+
+/** Whether the phone was transmit-limited, and on which chain, from the front-end Tx AGC records (0x184C). */
+export interface FrontEndUplink {
+  records: number;
+  /** Records whose block walk consumed the body exactly. */
+  framedRecords: number;
+  liveSamples: number;
+  atLimitSamples: number;
+  /** atLimitSamples / liveSamples: the share of transmitting samples sitting at the chain's limit. */
+  atLimitShare: number;
+  chains: TxChain[];
+  /** The chain with the most live samples ('0x10'), i.e. the one that was transmitting. */
+  liveChain?: string | undefined;
+  source: string;
+}
+
+/** PDCCH load from the PCFICH results (0xB12A): how many OFDM symbols the cell spent on control. */
+export interface PdcchLoad {
+  subframes: number;
+  /** CFI value -> subframes ({'1': 19012, '2': 2823, '3': 9605}). */
+  cfi: Record<string, number>;
+  /** Subframes at CFI 3, as a share of the decoded ones: a cell sitting at CFI 3 is congested. */
+  cfi3Share: number;
+  /** Elements whose PCFICH was not decoded, so they carry no CFI. */
+  notDecoded: number;
+}
+
+/** The uplink loop: what the PDCCH granted (0xB16C) against what the PUSCH reports say was sent (0xB139). */
+export interface UplinkGrants {
+  grants: number;
+  /** Downlink assignments in the same records: counted, contents not decoded. */
+  assignments: number;
+  /** Grants matched one-to-one to a PUSCH report four subframes later. */
+  matched: number;
+  prbGranted: number;
+  prbSent: number;
+  source: string;
+}
+
+/** What the modem's own clocks say about the holes in the trace (0x1D0B). */
+export interface TraceClock {
+  records: number;
+  /** Steps in the 1024 Hz counter wider than a record period: trace that was never written. */
+  gaps: { tMs: number; missingMs: number }[];
+  missingMs: number;
+  /** Consecutive sequence numbers that stepped by exactly 1. */
+  sequenceSteps: number;
+  sequenceStepsExpected: number;
+}
+
 export interface PhySummary {
   scellActivity: CarrierActivity[];
   nrDlActivity?: CarrierActivity | undefined;
@@ -614,6 +772,14 @@ export interface PhySummary {
   txAntennasMib: number[];
   /** EARFCN -> Rx antennas measured -> records ({'66786': {'4': 700, '2': 90}}). */
   rxAntennasByEarfcn: Record<string, Record<string, number>>;
+  /** Measured per serving cell from 0xB126, which is what the Antennas section should show. */
+  measuredAntennas?: AntennaConfig[] | undefined;
+  intraFreqNeighbours?: NeighbourCell[] | undefined;
+  macDl?: MacDlAccounting | undefined;
+  uplinkFrontEnd?: FrontEndUplink | undefined;
+  pdcchLoad?: PdcchLoad | undefined;
+  uplinkGrants?: UplinkGrants | undefined;
+  traceClock?: TraceClock | undefined;
 }
 
 /** A runtime self-check of a decoder against a physical or 3GPP identity ('Decoder health'). */
@@ -625,7 +791,12 @@ export interface PhyCheck {
   expectation: string;
 }
 
-export type AvailabilityStatus = 'available' | 'notDecodedYet' | 'notFoundInPlainLogs' | 'encryptedByModem' | 'notOnIPhone';
+export type AvailabilityStatus =
+  | 'available'
+  | 'notDecodedYet'
+  | 'notFoundInPlainLogs'
+  | 'encryptedByModem'
+  | 'notOnIPhone';
 
 export interface Availability {
   id: string;

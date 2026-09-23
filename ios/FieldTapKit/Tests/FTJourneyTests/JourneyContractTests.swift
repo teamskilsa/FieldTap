@@ -61,17 +61,19 @@ import FTTestSupport
         #expect(texts[1] == "Re-attached on B66 PCI 80 (EARFCN 67086) in 335 ms.")
         #expect(texts[2] == "IMS PDN connected in 240 ms.")
         #expect(texts[3] == "5G NR leg added at 0:13.799 (NR-ARFCN 174770, PCI 80, n5/n26).")
-        #expect(texts[4] == "Handover B66 PCI 80 → B12 PCI 235 in 44 ms.")
+        #expect(texts[4] == "Handover B66 PCI 80 → B12 PCI 235 in 43.7 ms.")
         #expect(texts[5] == "Carrier aggregation: 3 SCells on PCI 235 (B2, B2, B66), from 0:15.391.")
-        #expect(texts[6] == "Handover B12 PCI 235 → B2 PCI 80 in 26 ms.")
+        #expect(texts[6] == "Handover B12 PCI 235 → B2 PCI 80 in 26.1 ms.")
         #expect(texts[7] == "No failures: 34 procedures, all answered.")
         #expect(texts[8] == "23,764 records in 61 log codes were encrypted by the modem and can't be read.")
         #expect(texts[9] == "Trace covers 27.0 s.")
 
         let tiles = Dictionary(uniqueKeysWithValues: j.tiles.map { ($0.id, $0) })
-        #expect(tiles["rrcSetup"]?.value == "70 ms")
+        #expect(tiles["rrcSetup"]?.value == "70.2 ms")
         #expect(tiles["attach"]?.value == "335 ms")
-        #expect(tiles["handover"]?.value == "median 35 ms")
+        // One rule for every length on every screen (CallFlowPresentation.duration / Fmt.duration): the tile said
+        // "median 35 ms" while the ladder and the procedure list said 34.9 ms for the same two handovers.
+        #expect(tiles["handover"]?.value == "median 34.9 ms")
         #expect(tiles["scgAdd"]?.value == "n5/n26")
         #expect(tiles["abnormalReleases"]?.value == "0 of 2 connections")
         #expect(tiles["procedures"]?.value == "all answered")
@@ -100,8 +102,8 @@ import FTTestSupport
     func annotationsForTheLadder() throws {
         guard let (_, _, j) = try Self.iphone() else { return }
         #expect(JourneyQuery.annotation(forStepEvent: 10, in: j) == "Reselection, after switch-off detach")
-        #expect(JourneyQuery.annotation(forStepEvent: 83, in: j) == "Handover in 44 ms, NR leg released (inferred)")
-        #expect(JourneyQuery.annotation(forStepEvent: 117, in: j) == "Handover in 26 ms")
+        #expect(JourneyQuery.annotation(forStepEvent: 83, in: j) == "Handover in 43.7 ms, NR leg released (inferred)")
+        #expect(JourneyQuery.annotation(forStepEvent: 117, in: j) == "Handover in 26.1 ms")
         #expect(JourneyQuery.annotation(forStepEvent: 0, in: j) == nil)
     }
 
@@ -143,7 +145,7 @@ import FTTestSupport
         #expect(j.findings.contains { $0.kind == .noFailures })
         let tiles = Dictionary(uniqueKeysWithValues: j.tiles.map { ($0.id, $0) })
         #expect(tiles["serviceRequest"].map { ($0.succeeded, $0.attempts) } ?? (-1, -1) == (1, 1))
-        #expect(tiles["serviceRequest"]?.value == "99 ms")
+        #expect(tiles["serviceRequest"]?.value == "98.6 ms")
         #expect(tiles["pdn"].map { ($0.succeeded, $0.attempts) } ?? (-1, -1) == (1, 1))
         // Switched off at the very end: radio off runs to the end and no restart is claimed (J3).
         #expect(j.states.last?.state == .radioOff && j.states.last?.openAtEnd == true)
@@ -154,6 +156,6 @@ import FTTestSupport
         // The first NAS procedure is a Service request: registered (assumed) until the switch-off detach.
         #expect(j.registration.map(\.state) == [.registered, .deregistered])
         #expect(j.registration.first?.assumed == true)
-        #expect(j.findings.first { $0.kind == .pdnConnected }?.text == "IMS PDN connected in 29 ms.")
+        #expect(j.findings.first { $0.kind == .pdnConnected }?.text == "IMS PDN connected in 29.5 ms.")
     }
 }

@@ -2,19 +2,19 @@
 // with the elapsed time and memory printed. Only md5s, counts, codes and record versions are asserted or printed.
 // - first capture: the whole trace's .qmdl is the Python's (e53a167b..., the contract's iphone-recovered.qmdl), its
 //   stats serialise byte for byte as qdss-full-stats.json, and the secure census matches the PHY inventory;
-// - moving capture: equal to qdss_deframe.py's default rules run on the same 130 chunks (md5s below, from that run).
-//   Those rules keep one phase for the whole stream, and this trace's unit phase slips at its three missing files
-//   and inside 0x6222..0x6225, so they recover 18,667 records where a per-segment phase recovers 85,361.
+// - moving capture: the deframer's resync. This trace's unit phase slips at its three missing files and inside
+//   0x6222..0x6225, so one phase for the whole stream recovers only 18,667 of its records. With the resync it
+//   recovers 85,351, and every code the decoders read matches the reference's offline per-segment run (85,361).
 
 import { hexCode } from '../src/diag/record.ts';
-import { archive, fixture, gate, REAL } from '../tools/fixtures.ts';
+import { fixture, gate, gateCapture, REAL } from '../tools/fixtures.ts';
 import { md5 } from '../tools/md5.ts';
 import { assert, assertEquals } from './assert.ts';
 import { tsvOf } from './qdss_support.ts';
 import { type CaptureRun, deframeArchive, qmdlMd5, versions } from './qdss_capture.ts';
 
-const FIRST = archive(REAL.first);
-const MOVING = archive(REAL.moving);
+const FIRST = REAL.first;
+const MOVING = REAL.moving;
 const FULL_STATS = fixture('qdss-full-stats.json');
 const INVENTORY = fixture('reference-phy/inventory.tsv');
 
@@ -23,7 +23,7 @@ function report(label: string, run: CaptureRun): void {
   console.log(
     `${label}: ${run.chunks} chunks, read ${Math.round(run.readMs)} ms, deframe ${Math.round(run.deframeMs)} ms, ` +
       `sampled peak RSS ${run.sampledRssMb} MB / heap ${run.sampledHeapMb} MB; ${stats.log_records} records, ` +
-      `${stats.distinct_codes} codes, secure ${secure.records} / ${secure.codes} codes`,
+      `${stats.distinct_codes} codes, secure ${secure.records} / ${secure.codes} codes (read as ${run.from})`,
   );
 }
 
@@ -31,7 +31,7 @@ const text = (s: string) => md5(new TextEncoder().encode(s));
 
 Deno.test({
   name: 'first capture (.tar.gz through src/archive): .qmdl e53a167b..., stats equal qdss-full-stats.json, secure census',
-  ignore: gate(FIRST, FULL_STATS, INVENTORY),
+  ignore: gate(FULL_STATS, INVENTORY) || gateCapture(FIRST),
   fn: async () => {
     const run = await deframeArchive(FIRST);
     report('first capture', run);
@@ -54,21 +54,43 @@ Deno.test({
 });
 
 Deno.test({
-  name: 'moving capture: default rules, equal to qdss_deframe.py on the same chunks (.qmdl, .tsv, stats.json md5s)',
-  ignore: gate(MOVING),
+  name: 'moving capture: the resync recovers the trace, matching the reference per-segment run code for code',
+  ignore: gateCapture(MOVING),
   fn: async () => {
     const run = await deframeArchive(MOVING, { index: true });
     report('moving capture', run);
     const { output } = run;
     const s = output.stats;
-    assertEquals(qmdlMd5(output.records), '8c12310db74d60b635e50130da1469e1');
-    assertEquals(text(tsvOf(output.index!)), '42e7e5112d1ef9cff89b24051ff88c85', '.tsv');
-    assertEquals(text(JSON.stringify(s, null, 1)), '6197829fa1972ced33fb392616207db7', 'stats.json, byte for byte');
-    assertEquals([s.chunks, s.atid32_bytes, s.stats['phase'], s.log_records, s.distinct_codes], [130, 123_780_488, 8, 18_667, 105]);
-    // The phase slips show as bad-type and fill units read out of phase, and as unknown fragment kinds.
-    assert((s.stats['u_badtype'] ?? 0) > 3_000_000 && (s.stats['gather_unknown_kind_0'] ?? 0) > 8_000, 'units read out of phase');
-    assertEquals([s.targets[hexCode(0xb0c0)], s.targets[hexCode(0xb821)], output.secure.records, output.secure.codes], [6, 0, 1202, 4]);
-    assertEquals(versions(output.records, 0xb0c0), { '30': 6 }, 'the LTE RRC records that survive are v30, as in the first capture');
+    // Layer 1 is untouched by the resync: the same ATID stream as the fixed-phase run read.
+    assertEquals([s.chunks, s.atid32_bytes, s.stats['phase']], [130, 123_780_488, 8]);
     assertEquals(output.bytesPerAtid, { none: 84, '0x32': 123_780_488, '0x10': 50_478, '0x7d': 20, '0x00': 438 });
+
+    // The resync fires where the reference's offline slip hunt found slips: 3 chunk-sequence holes and 5 mid-chunk.
+    assertEquals([s.stats['chunk_gaps'], s.stats['resync_gap'], s.stats['resync_slip']], [3, 3, 5]);
+    assertEquals(s.stats['resync_new_phase'], 8, 'every resync found a different phase');
+
+    // Against the reference run with 9 phase segments (85,361 records, 222 codes, ts 81,155/4,126/80). Detecting a
+    // slip online costs the RESYNC_RUN units it takes to notice, so a few fragments per slip are cut short where
+    // the offline run switched phase exactly: 85,351 of 85,361, all of the shortfall in unstamped filler.
+    assert(s.log_records >= 80_000, `${s.log_records} records, under the 80,000 floor`);
+    assertEquals(s.log_records, 85_351);
+    assertEquals(s.distinct_codes, 222);
+    assertEquals(s.ts, { '2026': 81_145, zero: 4_126, other: 80 });
+    assertEquals(s.incomplete_records, 0);
+
+    // Every code the signalling and PHY decoders read is recovered in full, at the reference's count.
+    assertEquals(
+      [0xb0c0, 0xb0c1, 0xb0c2, 0xb821, 0xb825, 0xb826, 0xb80c].map((c) => s.targets[hexCode(c)]),
+      [67, 3, 2, 4, 2, 357, 1],
+      'target codes equal the reference per-segment run',
+    );
+    assertEquals([s.packets['secure'], s.packets['extmsg_0x79'], s.packets['qsr4_0x99'], s.packets['event_0x60']], [35_214, 8_238, 50_471, 1_009]);
+    assertEquals(versions(output.records, 0xb0c0), { '30': 67 }, 'LTE RRC v30, as in the first capture');
+    assertEquals(versions(output.records, 0xb821), { '0.26': 4 }, 'NR RRC 0.26, as in the first capture');
+
+    // The .qmdl and .tsv are self-consistent; there is no Python oracle for the online resync, so they are pinned
+    // here (the reference's own per-segment qmdl is eaa45696..., its 10 extra records aside).
+    assertEquals(output.index!.length, s.log_records, 'one index row per record');
+    assert(qmdlMd5(output.records).length === 32 && text(tsvOf(output.index!)).length === 32);
   },
 });

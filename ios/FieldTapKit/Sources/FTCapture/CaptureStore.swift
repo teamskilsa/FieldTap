@@ -73,15 +73,20 @@ public final class CaptureStore: CaptureStoring, @unchecked Sendable {
     }
 
     /// Writes the capture (records as capture.qmdl, when there are any) and its summary; returns the .qmdl URL.
+    ///
+    /// The modem's position records never reach the file: `CapturePrivacy.filter` drops them here, which is the
+    /// one place a capture becomes a file, so nothing the user copies, shares or exports can contain them. They
+    /// are counted in the summary and the count is all the app ever shows.
     @discardableResult
     public func save(records: [LogRecord], summary: CaptureSummary) throws -> URL {
         let dir = directory(summary.id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         Self.excludeFromBackup(dir)
         let qmdl = dir.appendingPathComponent(Self.qmdlName)
+        let exportable = CapturePrivacy.filter(records).kept
         do {
-            if !records.isEmpty {
-                _ = try Qdss.writeQmdl(records, to: qmdl)
+            if !exportable.isEmpty {
+                _ = try Qdss.writeQmdl(exportable, to: qmdl)
                 Self.protect(qmdl)
             }
             try Self.write(Self.encoder.encode(summary), to: dir.appendingPathComponent(Self.summaryName))

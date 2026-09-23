@@ -19,7 +19,7 @@ public enum JourneyBuilder {
         var f = facts
         if f.encrypted.records == 0 { f.encrypted = phy.encrypted }
         if f.traceWindowMs <= 0 { f.traceWindowMs = ctx.endMs }
-        journey.findings = Findings.of(flow: flow, journey: journey, facts: f)
+        journey.findings = Findings.of(flow: flow, journey: journey, facts: f, phy: phy)
         journey.tiles = KpiTiles.of(flow: flow, journey: journey, phy: phy)
         return journey
     }

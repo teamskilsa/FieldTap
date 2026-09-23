@@ -117,8 +117,8 @@ event-derived times, 100 ms for PHY-derived.
 ## PHY parity (FTPhy, WP4)
 
 FTPhy ports the validated reference extractor (`Fixtures/local/reference-phy/kpis.py` and friends) with the
-same numbers, not the same code: `phy-golden.json` (48 KPIs: unit, code, count, min, max, mean, per-index
-arrays, first and last 3 samples) and `phy-summary.json` (SCell and NR DL activity, RACH/TA, antennas,
+same numbers, not the same code: `phy-golden.json` (48 KPIs, which are `PhyMetric.referenceKpis`: unit, code,
+count, min, max, mean, per-index arrays, first and last 3 samples) and `phy-summary.json` (SCell and NR DL activity, RACH/TA, antennas,
 encrypted census) are the contract. Sample counts are exact; min, max and mean within 0.01 (or 1e-4
 relative); sample times within 1.0 ms. Times are ms since the D1 time base (`timeBase.unixStart` in the
 golden is 1,790,019,725.984205 s).
@@ -135,10 +135,32 @@ come from 3GPP TS 36.213 / 38.214 (the srsRAN files in reference-phy/refs are AG
 ## Strict version policy
 
 Every PHY decoder accepts only the record versions validated on this modem: B0C1 v2, B0C2 v3, B193 v1/0x19
-v66, B173 v50, B139 v162, B14E/B14D v164, B064 v1/0x08 v7, B062 v1/0x06 v50, B97F 3.0, B887 3.13, B888 3.1.
-Any other version is counted in `PhyCapture.versionMisses` and shown as "not decodable (version N)", never
-guessed. The same holds for the RRC header layouts (D2): an unknown packet version is undecoded, not
-approximated. A new iPhone model or baseband firmware first gets its own local fixture set.
+v66, B173 v50, B139 v162, B14E/B14D v164, B064 v1/0x08 v7, B062 v1/0x06 v50, B97F 3.0, B887 3.13, B888 3.1,
+and, from the second research pass, B126 v163, B12A v161, B16C v50, B179 v56, B063 v50, 0x184C v17 and
+0x1D0B v7. Any other version is counted in `PhyCapture.versionMisses` and shown as "not decodable (version
+N)", never guessed. The same holds for the RRC header layouts (D2): an unknown packet version is undecoded,
+not approximated. A new iPhone model or baseband firmware first gets its own local fixture set.
+
+## The decoders added after the reference extractor
+
+`phy-golden.json`'s 48 KPIs stay the contract for the reference extractor's own series (`PhyMetric.
+referenceKpis`, the first 48 cases). The decoders derived in `docs/research/iphone-named-log-codes.md` and
+`iphone-unknown-log-codes.md` add 22 more series (`PhyMetric.addedAfterReference`), which the golden does not
+cover; they are held to the research documents' numbers instead, on **both** captures, by
+`FTPhyTests/AddedCaptureTests` — record counts, framing shares, the cross-code agreement against 0xB173,
+0xB139, 0xB193 and 0xB0C1, the byte totals, and the two clocks of 0x1D0B. Thirteen runtime self-checks come
+with them (`PhyChecks.added`), with one deliberate deviation from the research's table: 0xB179's serving RSRP
+gates on the **mean** offset from 0xB193 being within 1 dB, not on the share within 1 dB, because that share
+is 89% stationary and 35% while driving, where the two records are a few subframes apart and RSRP is moving;
+the share is reported in the check's text. 0xB063's walk coverage and 0x1D0B's sleep-clock rate are reported
+and not gated, for the reasons each check states.
+
+Two records need no timestamp from the transport: 0xB179 carries none at all and is placed by its own TTI
+(`PhyTtiAxis`), and the same axis unwraps the 10.24 s frame cycle so a cross-code check does not compare
+subframes seconds apart.
+
+`PhySummary` gains three optional fields (`antennas`, `macDl`, `traceGaps`); an older summary still decodes,
+and `contract/phy-summary.json` is unchanged.
 
 ## Fixture inventory
 

@@ -21,8 +21,8 @@ import FTTestSupport
         guard let l = loaded(), let golden = RealCapture.json(RealCapture.golden),
               let kpis = golden["kpis"] as? [String: [String: Any]] else { return }
         #expect(kpis.count == 48)
-        #expect(Set(kpis.keys) == Set(PhyMetric.allCases.map(\.rawValue)))
-        for metric in PhyMetric.allCases {
+        #expect(Set(kpis.keys) == Set(PhyMetric.referenceKpis.map(\.rawValue)))
+        for metric in PhyMetric.referenceKpis {
             guard let g = kpis[metric.rawValue], let series = l.run.capture.series[metric] else {
                 Issue.record("\(metric.rawValue) missing"); continue
             }
@@ -91,10 +91,14 @@ import FTTestSupport
         #expect(s.nr.b887Records == 497 && s.nr.b887CrcFail == 27 && s.nr.b887PassBytes == 653_592, "\(s.nr)")
         #expect(s.nr.deltaDecodes == 497 && s.nr.deltaCrcFail == 27 && s.nr.deltaPassBytes == 653_592, "\(s.nr)")
         #expect(s.nrTbs.matched == 472 && s.nrTbs.retx == 25 && s.nrTbs.unexplained == 0, "\(s.nrTbs)")
+        // Every one of the 497 transport blocks is accounted for, and none of them needs the wider fields the
+        // second capture forced on 0xB887 (FTAppTests covers that side): 497 -> 497 either way.
+        #expect(s.nrTbs.matched + s.nrTbs.retx == s.nr.b887Records, "\(s.nrTbs) of \(s.nr.b887Records)")
         #expect(s.macSamples == 4537 && s.macConsistent == 4537)
         let checks = l.run.capture.checks
-        #expect(Set(checks.map(\.id)) == ["b193RsrqIdentity", "b173TbsTable", "b139TbsModulation", "b887TbsFormula",
-                                          "b887VsB888", "b064HeaderAccounting"])
+        // The reference's own six, then the added decoders' (AddedDecoderTests asserts those numbers).
+        #expect(Set(checks.map(\.id).prefix(6)) == ["b193RsrqIdentity", "b173TbsTable", "b139TbsModulation", "b887TbsFormula",
+                                                    "b887VsB888", "b064HeaderAccounting"])
         for c in checks { #expect(c.passed, "\(c.id): \(c.measured)") }
     }
 
@@ -112,7 +116,8 @@ import FTTestSupport
             #expect(shipped.checks == l.run.capture.checks)
         } else {
             #expect(shipped.series[.lte_ul_mcs_derived]?.samples.isEmpty == true)
-            #expect(Set(shipped.checks.map(\.id)) == ["b193RsrqIdentity", "b887TbsFormula", "b887VsB888", "b064HeaderAccounting"])
+            #expect(Set(shipped.checks.map(\.id).prefix(4)) == ["b193RsrqIdentity", "b887TbsFormula", "b887VsB888",
+                                                                "b064HeaderAccounting"])
             #expect(shipped.availability.contains { $0.id == "lteTbsTable" })
         }
     }

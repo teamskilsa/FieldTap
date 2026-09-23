@@ -2,8 +2,8 @@
 // - first capture (profile on): 130 of 241 trace files, +19 to +46.844 s after the press; the chunks the reader
 //   keeps are byte-identical to the deframer fixtures' inputs (md5 per chunk);
 // - moving capture (profile on): 130 of 1,024 files, -4 to +18.506 s, 3 files missing inside the window;
-// - profile off: only its extracted folder exists; it is read through the collector and through an in-memory
-//   tar.gz of the same paths.
+// - profile off: synthetic (the archive was never here and the stand-in folder is gone), read through the
+//   collector and through an in-memory tar.gz of the same paths.
 // Only counts, times and profile dates are asserted or printed.
 
 import { archiveFacts, readSysdiagnose, SysdiagnoseCollector } from '../src/archive/sysdiagnose.ts';
@@ -11,11 +11,10 @@ import { archive, exists, fixture, gate, REAL } from '../tools/fixtures.ts';
 import { readJson } from '../tools/golden.ts';
 import { md5 } from '../tools/md5.ts';
 import { assert, assertEquals } from './assert.ts';
-import { buildTar, gzip, streamOf } from './support.ts';
+import { buildTar, gzip, loggingOffFiles, streamOf } from './support.ts';
 
 const FIRST = archive(REAL.first);
 const MOVING = archive(REAL.moving);
-const OFF = archive(REAL.offFolder);
 const PRESS_FIRST = Date.UTC(2026, 8, 21, 19, 41, 47);
 const PRESS_MOVING = Date.UTC(2026, 8, 22, 12, 57, 25);
 const PROFILE = {
@@ -132,27 +131,21 @@ Deno.test({
   },
 });
 
-/** The files the profile-off folder holds under the paths the reader wants. */
-function offFolderFiles(): { path: string; bytes: Uint8Array }[] {
-  const out: { path: string; bytes: Uint8Array }[] = [];
-  for (const dir of ['logs/Baseband', 'logs/MCState/Shared']) {
-    for (const e of Deno.readDirSync(`${OFF}/${dir}`)) {
-      if (!e.isFile) continue;
-      if (dir === 'logs/MCState/Shared' && !/^profile-.*\.stub$/.test(e.name)) continue;
-      out.push({ path: `${REAL.offFolder}/${dir}/${e.name}`, bytes: Deno.readFileSync(`${OFF}/${dir}/${e.name}`) });
-    }
-  }
-  return out;
-}
+/** The top-level directory of the synthetic profile-off capture: the 14-39-54 archive the task names, which was
+ *  never on this Mac. Its press time is what archiveFacts reads out of the name. */
+const OFF_ROOT = 'sysdiagnose_2026.09.21_14-39-54-0400_iPhone-OS_iPhone_23F84';
 
 Deno.test({
-  name: 'profile-off capture (extracted folder): logging off, no trace, no Baseband stub, guide "off"',
-  ignore: gate(OFF),
+  name: 'profile-off capture (synthetic): logging off, no trace, no Baseband stub, guide "off"',
   fn: async () => {
-    assert(!exists(archive('sysdiagnose_2026.09.21_14-39-54-0400_iPhone-OS_iPhone_23F84.tar.gz')), 'the named archive is absent; the folder stands in');
-    const files = offFolderFiles();
+    // Not gated on a capture any more. The 14-39-54 archive never existed here, and the extracted 14-35-58
+    // folder that stood in for it has been deleted from ~/Downloads, so the shape is invented instead
+    // (tests/support.ts loggingOffFiles): an ambtool log that says logging is off, one unrelated MDM stub,
+    // and no trace directory.
+    assert(!exists(archive(`${OFF_ROOT}.tar.gz`)), 'the named archive is still absent; the synthetic one stands in');
+    const files = loggingOffFiles(OFF_ROOT).map((s) => ({ path: s.path, bytes: s.data as Uint8Array }));
     const expectFacts = (facts: ReturnType<typeof archiveFacts>) => {
-      assertEquals(facts.triggerTime, '2026-09-21T18:35:58.000Z');
+      assertEquals(facts.triggerTime, '2026-09-21T18:39:54.000Z');
       assertEquals(facts.traceWindow, null);
       assertEquals(facts.hasTrace, false);
       assertEquals(facts.loggingEnabled, false);
@@ -165,7 +158,7 @@ Deno.test({
     for (const f of files) if (collector.wants(f.path, f.bytes.length)) collector.add(f.path, f.bytes);
     const parts = collector.parts();
     assertEquals([parts.chunks.length, parts.stubs.length, parts.ambtool !== undefined], [0, 1, true]);
-    expectFacts(archiveFacts(parts, `${REAL.offFolder}.tar.gz`, PRESS_FIRST));
+    expectFacts(archiveFacts(parts, `${OFF_ROOT}.tar.gz`, PRESS_FIRST));
     // As an archive: the same paths in an in-memory tar.gz (never written to disk).
     const gz = await gzip(buildTar(files.map((f) => ({ path: f.path, data: f.bytes }))));
     const read = await readSysdiagnose(streamOf(gz, [4096]));

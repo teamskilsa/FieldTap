@@ -317,4 +317,95 @@ import FTModel
         #expect(out.records.map(\.code) == [0xB0C0, 0xB0C1, 0xB821])
         #expect(out == Self.deframe(chunks))
     }
+
+    // MARK: Resync
+
+    /// Units that no phase can read: their low 5 bits are 0x1F, which is none of fill, channel, start or
+    /// continuation, whatever byte of them the unit boundary lands on.
+    static func junk(units: Int, extraBytes: Int = 0) -> [UInt8] {
+        [UInt8](repeating: 0xFF, count: 16 * units + extraBytes)
+    }
+
+    static func group(_ lane: Int, _ channel: UInt16, _ code: UInt16, _ low: UInt32) -> [UInt8] {
+        S.channelUnit(lane: lane, channel: channel)
+            + S.fragment(lane: lane, kind: 1, payload: Self.log(code, low, Self.bytes(40, seed: UInt8(low & 0xFF))))
+                .flatMap { $0 }
+    }
+
+    /// Bytes lost mid-stream shift every unit after them. The old fixed phase read the rest of the stream as
+    /// noise; with resync the deframer finds the new phase and the later records come back. The stream before
+    /// the loss is the longer half, as it is in a real capture, so find_phase starts on its phase.
+    @Test func bytesLostMidStreamResyncAndTheRestIsRecovered() {
+        let before = Self.group(0, 7, 0xB0C0, 1) + Self.group(0, 7, 0xB0C1, 2) + Self.group(0, 7, 0xB0C2, 3)
+            + Self.group(0, 7, 0xB0E2, 4)
+        let after = Self.group(1, 9, 0xB821, 5) + Self.group(2, 11, 0xB826, 6)
+        // Five bytes eaten, then a stretch no phase can read: eight bad units in a row ask for a new phase.
+        let out = Self.deframe([Self.chunk([before + Self.junk(units: 10, extraBytes: 5) + after])])
+        #expect(out.records.map(\.code) == [0xB0C0, 0xB0C1, 0xB0C2, 0xB0E2, 0xB821, 0xB826])
+        #expect(out.stats.counters["resyncs"] == 1)
+        #expect((out.stats.counters["u_badtype"] ?? 0) >= QdssDeframer.resyncAfterBadUnits)
+        // Without resync the four records before the loss are all that survives.
+        #expect(out.records.count == 6)
+    }
+
+    /// Fewer bad units than the threshold are just bad units: the phase is still good, so nothing is dropped
+    /// and the deframer behaves exactly as it did before resync existed.
+    @Test func aShortRunOfBadUnitsDoesNotResync() {
+        let stream = Self.group(0, 7, 0xB0C0, 1) + Self.junk(units: QdssDeframer.resyncAfterBadUnits - 1)
+            + Self.group(1, 9, 0xB821, 2)
+        let out = Self.deframe([Self.chunk([stream])])
+        #expect(out.records.map(\.code) == [0xB0C0, 0xB821])
+        #expect(out.stats.counters["u_badtype"] == QdssDeframer.resyncAfterBadUnits - 1)
+        #expect(out.stats.counters["resyncs"] == nil)
+        #expect(out.stats.counters["resync_dropped_fragments"] == nil)
+    }
+
+    /// A fragment the lost bytes cut in half is dropped, not emitted as a half-read record; a fragment that was
+    /// already whole and only waiting for the next start unit is kept.
+    @Test func aHalfFragmentIsDroppedAndAWholeOneIsKept() {
+        // A whole fragment on lane 0, still open because nothing followed it, and a truncated one on lane 1.
+        let whole = Self.group(0, 7, 0xB0C0, 1)
+        var cut = S.channelUnit(lane: 1, channel: 8)
+        cut += S.fragment(lane: 1, kind: 1, payload: Self.log(0x1375, 4, Self.bytes(300))).dropLast(2).flatMap { $0 }
+        let out = Self.deframe([Self.chunk([whole + cut + Self.junk(units: 10, extraBytes: 3)
+            + Self.group(2, 9, 0xB821, 2)])])
+        #expect(out.records.map(\.code) == [0xB0C0, 0xB821])
+        #expect(out.stats.counters["resync_dropped_fragments"] == 1)
+        #expect(out.stats.counters["messages_incomplete"] == nil)
+        #expect(out.stats.incompleteRecords == 0)
+    }
+
+    /// A chunk missing from the archive takes an unknown number of bytes with it, so the lane bindings, the
+    /// open fragments and the phase are all dropped at the gap and the next chunk is read on its own terms.
+    @Test func aGapInTheChunkNumberingResetsTheLanes() {
+        let a = Self.chunk([Self.group(0, 7, 0xB0C0, 1)])
+        let b = Self.chunk([Self.group(0, 9, 0xB821, 2)])
+        var d = QdssDeframer()
+        a.withUnsafeBytes { d.feedChunk($0, sequence: 0x61D5) }
+        b.withUnsafeBytes { d.feedChunk($0, sequence: 0x61D7) }        // 0x61D6 is missing
+        let out = d.finish()
+        #expect(out.records.map(\.code) == [0xB0C0, 0xB821])
+        #expect(out.stats.counters["chunk_gaps"] == 1)
+        #expect(out.stats.chunks == 2)
+    }
+
+    /// Chunk numbers that follow on change nothing at all: the same bytes give the same records, stats and
+    /// counters as feeding them without numbers, which is what keeps the 2026-09-21 capture byte-identical.
+    @Test func consecutiveChunkNumbersChangeNothing() {
+        let chunks = Archives.chunks()
+        var d = QdssDeframer()
+        for (i, c) in chunks.enumerated() { c.withUnsafeBytes { d.feedChunk($0, sequence: 0x100 + i) } }
+        #expect(d.finish() == Self.deframe(chunks))
+    }
+
+    /// Junk between two chunks, found only after the chunk boundary: resync carries across chunks.
+    @Test func resyncWorksAcrossChunkBoundaries() {
+        let a = Self.chunk([Self.group(0, 7, 0xB0C0, 1) + Self.junk(units: 4, extraBytes: 7)])
+        let b = Self.chunk([Self.junk(units: 8) + Self.group(1, 9, 0xB821, 2)])
+        let out = Self.deframe([a, b])
+        #expect(out.records.map(\.code).contains(0xB821))
+        // One resync per run of bad units, and the junk here spans the chunk boundary.
+        #expect((out.stats.counters["resyncs"] ?? 0) >= 1)
+    }
+
 }

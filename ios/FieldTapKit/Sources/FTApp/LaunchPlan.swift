@@ -11,7 +11,8 @@ import FTPresentation
 ///     -FTCursorMs <ms>           move the time cursor
 ///     -FTEvent <index>           select an event (the message sheet for -FTScreen message)
 ///     -FTFilter ALL|RRC|NAS      the call-flow filter
-///     -FTRadioSection <name>     signal | dl | ul | csi | nr | antennas | carriers | rach | unavailable
+///     -FTRadioSection <name>     signal | neighbours | dl | mac | ul | csi | nr | antennas | carriers | rach | unavailable
+///     -FTRadioEntry <id>         scroll the Not available list to one catalogue entry ("nrUlSchedule")
 ///     -FTImportState <token>     an import sheet state (ImportState.preview): done, reading..., noBasebandTrace...
 ///     -FTGuideState <token>      a Modem logging guide state (GuideState(token:)): off, expired, expiringSoon...
 public struct LaunchPlan: Hashable, Sendable {
@@ -22,14 +23,16 @@ public struct LaunchPlan: Hashable, Sendable {
     public var event: Int?
     public var filter: FlowFilter?
     public var radioSection: String?
+    /// A catalogue entry id to scroll the Not available list to (PhyCatalog ids).
+    public var radioEntry: String?
     public var importState: String?
     public var guideState: String?
     /// Arguments that looked like ours but could not be read, reported rather than ignored.
     public var problems: [String] = []
 
     public init(route: Route? = nil, openLatest: Bool = false, fixtureDir: URL? = nil, cursorMs: Double? = nil,
-                event: Int? = nil, filter: FlowFilter? = nil, radioSection: String? = nil, importState: String? = nil,
-                guideState: String? = nil) {
+                event: Int? = nil, filter: FlowFilter? = nil, radioSection: String? = nil, radioEntry: String? = nil,
+                importState: String? = nil, guideState: String? = nil) {
         self.route = route
         self.openLatest = openLatest
         self.fixtureDir = fixtureDir
@@ -37,6 +40,7 @@ public struct LaunchPlan: Hashable, Sendable {
         self.event = event
         self.filter = filter
         self.radioSection = radioSection
+        self.radioEntry = radioEntry
         self.importState = importState
         self.guideState = guideState
     }
@@ -44,7 +48,7 @@ public struct LaunchPlan: Hashable, Sendable {
     /// True when nothing was asked for: a normal launch.
     public var isEmpty: Bool {
         route == nil && !openLatest && fixtureDir == nil && cursorMs == nil && event == nil && filter == nil
-            && radioSection == nil && importState == nil && guideState == nil
+            && radioSection == nil && radioEntry == nil && importState == nil && guideState == nil
     }
 
     /// True when the plan needs a capture open (a detail page, or -FTOpenLatest).
@@ -87,6 +91,8 @@ public struct LaunchPlan: Hashable, Sendable {
                 if plan.filter == nil { plan.problems.append("-FTFilter \(v ?? "")") }
             case "-FTRadioSection":
                 plan.radioSection = value()
+            case "-FTRadioEntry":
+                plan.radioEntry = value()
             case "-FTImportState":
                 plan.importState = value()
             case "-FTGuideState":

@@ -18,13 +18,9 @@ public enum JourneyText {
         return "\(total / 60):\(pad(total % 60, 2))"
     }
 
-    /// "44 ms", "12.7 s", "1:05".
-    public static func duration(_ ms: Double) -> String {
-        let v = max(0, ms)
-        if v < 1_000 { return "\(Int(v.rounded())) ms" }
-        if v < 60_000 { return Fmt.fixed(v / 1_000, 1) + " s" }
-        return shortClock(v)
-    }
+    /// "43.7 ms", "335 ms", "12.7 s", "1 min 5 s": `CallFlowPresentation.duration`'s rule (`Fmt.duration`), so
+    /// a KPI tile, the ladder and a popover never give the same length two different ways.
+    public static func duration(_ ms: Double) -> String { Fmt.duration(ms) }
 
     /// "0.56 s" (two decimals under 10 s, else one).
     public static func seconds(_ ms: Double) -> String {

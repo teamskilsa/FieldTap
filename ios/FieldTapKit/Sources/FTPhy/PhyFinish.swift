@@ -9,13 +9,18 @@ extension Extraction {
         addBins()
         addNrCounterDeltas()
         inferRsrqIdentity()
+        summariseB179Deltas()
+        crossCheckAdded()
 
         var series: [PhyMetric: PhySeries] = [:]
         for m in PhyMetric.allCases {
             var s = m.emptySeries
             s.samples = samples[m] ?? []
-            // CSI series merge 0xB14E and 0xB14D samples: keep them in time order (stable, 0xB14E first on ties).
-            if m == .lte_cqi_wideband_cw0 || m == .lte_ri || m == .lte_pmi_wideband {
+            // The added decoders place their samples inside the record they came from (a sub-record is a subframe,
+            // not the moment the record was written), and consecutive records overlap, so their samples need one
+            // time order before PhyQuery's binary searches can use them.
+            if m == .lte_cqi_wideband_cw0 || m == .lte_ri || m == .lte_pmi_wideband
+                || PhyMetric.addedAfterReference.contains(m) {
                 s.samples = s.samples.enumerated()
                     .sorted { ($0.element.tMs, $0.offset) < ($1.element.tMs, $1.offset) }.map(\.element)
             }
@@ -37,9 +42,13 @@ extension Extraction {
             rxAntennasByEarfcn: Dictionary(uniqueKeysWithValues: rxByEarfcn.map { e, counts in
                 (String(e), Dictionary(uniqueKeysWithValues: counts.map { (String($0.key), $0.value) }))
             }),
-            encrypted: secure)
+            encrypted: secure,
+            antennas: measuredAntennas(),
+            macDl: macDlAccounting(),
+            traceGaps: stats.d1d0b.records > 0 ? traceGaps.sorted { $0.tMs < $1.tMs } : nil)
 
-        let capture = PhyCapture(series: series, summary: summary, checks: PhyChecks.checks(stats, tbsAvailable: tbs.isAvailable),
+        let capture = PhyCapture(series: series, summary: summary,
+                                 checks: PhyChecks.checks(stats, tbsAvailable: tbs.isAvailable) + PhyChecks.added(stats),
                                  versionMisses: versionMisses,
                                  availability: PhyCatalog.availability(recordsPerCode: recordsPerCode, secure: secure,
                                                                        tbsAvailable: tbs.isAvailable))
@@ -104,6 +113,44 @@ extension Extraction {
             let mean = v.reduce(0, +) / Double(v.count)
             let sd = (v.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(v.count)).squareRoot()
             return (mean, sd, v.count)
+        }
+    }
+}
+
+extension Extraction {
+    /// 0xB126's measured antenna configuration, or nil when the capture has no 0xB126 record.
+    func measuredAntennas() -> MeasuredAntennas? {
+        guard stats.b126.subRecords > 0 else { return nil }
+        let byCell = Dictionary(uniqueKeysWithValues: txPortsByCell.map { cell, counts in
+            (cell, Dictionary(uniqueKeysWithValues: counts.map { (String($0.key), $0.value) }))
+        })
+        return MeasuredAntennas(txPortsByCell: byCell,
+                                rxAntennas: Dictionary(uniqueKeysWithValues: rxAntennaCounts.map { (String($0.key), $0.value) }),
+                                rank: Dictionary(uniqueKeysWithValues: rankCounts.map { (String($0.key), $0.value) }),
+                                subRecords: stats.b126.subRecords,
+                                source: "0xB126 v163 PDSCH demapper configuration, 20 subframes per record")
+    }
+
+    /// 0xB063's MAC downlink accounting with its coverage, or nil when the capture has no 0xB063 record.
+    func macDlAccounting() -> MacDlAccounting? {
+        let b = stats.b063
+        guard b.records > 0 else { return nil }
+        return MacDlAccounting(records: b.records, declaredBlocks: b.declared, foundBlocks: b.found,
+                               exactWalks: b.exactWalks, macBytes: b.macBytes, paddingBytes: b.paddingBytes,
+                               signallingBytes: b.signallingBytes, dataBytes: b.dataBytes,
+                               controlElements: Dictionary(uniqueKeysWithValues: b.controlElements.map { (String($0.key), $0.value) }),
+                               source: "0xB063 v50 MAC DL transport block")
+    }
+
+    /// The mean and spread of 0xB179's serving values against 0xB193's, which is what fixes its scales.
+    mutating func summariseB179Deltas() {
+        guard !b179RsrpDeltas.isEmpty else { return }
+        let mean = b179RsrpDeltas.reduce(0, +) / Double(b179RsrpDeltas.count)
+        let variance = b179RsrpDeltas.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(b179RsrpDeltas.count)
+        stats.b179.rsrpMeanDb = mean
+        stats.b179.rsrpSdDb = variance.squareRoot()
+        if !b179RsrqDeltas.isEmpty {
+            stats.b179.rsrqMeanDb = b179RsrqDeltas.reduce(0, +) / Double(b179RsrqDeltas.count)
         }
     }
 }
