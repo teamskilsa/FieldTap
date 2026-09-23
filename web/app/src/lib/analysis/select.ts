@@ -1,4 +1,20 @@
-import type { CaptureAnalysis, Journey, PhyMetric, PhySample, PhySeries } from "@engine/types";
+import type { CaptureAnalysis, Journey, PhyMetric, PhySample, PhySeries, SecurityReport } from "@engine/types";
+import { analyzeSecurity } from "@engine/security/report";
+
+/**
+ * The fake-base-station report. Real captures carry it from the worker (analyze.ts sets `analysis.security`); the
+ * synthetic sample and any analysis built without the pipeline do not, so we compute it here from the same pure,
+ * no-network engine function. It is memoised on the analysis object so a re-render does not re-run it.
+ */
+const cache = new WeakMap<CaptureAnalysis, SecurityReport>();
+export function securityOf(analysis: CaptureAnalysis): SecurityReport {
+  if (analysis.security) return analysis.security;
+  const cached = cache.get(analysis);
+  if (cached) return cached;
+  const report = analyzeSecurity(analysis);
+  cache.set(analysis, report);
+  return report;
+}
 
 export function seriesOf(a: CaptureAnalysis, metric: PhyMetric): PhySeries | undefined {
   return a.phy.find((s) => s.metric === metric);

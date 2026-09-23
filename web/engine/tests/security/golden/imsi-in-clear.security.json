@@ -1,0 +1,60 @@
+{
+  "verdict": "suspicious",
+  "headline": "This capture carries Layer-3 signatures associated with fake base stations. Review each finding — this is evidence to check, not proof.",
+  "cells": [
+    {
+      "cell": {
+        "earfcn": 100,
+        "pci": 11,
+        "nr": false
+      },
+      "verdict": "suspicious",
+      "findings": [
+        {
+          "id": "imsiRequestedInClear-1",
+          "check": "imsiRequestedInClear",
+          "severity": "suspicious",
+          "title": "IMSI requested in the clear",
+          "explanation": "The network asked for the permanent subscriber identity (IMSI) before any security was set up. A real network uses a temporary identity (GUTI) here; asking for the IMSI in the clear is how a catcher harvests it.",
+          "evidence": [
+            "Identity request: Identity requested = IMSI, before any Security Mode Command"
+          ],
+          "event": 1,
+          "tMs": 100,
+          "cell": {
+            "earfcn": 100,
+            "pci": 11,
+            "nr": false
+          }
+        }
+      ],
+      "band": "B12"
+    }
+  ],
+  "findings": [],
+  "checksRun": [
+    "nullCipher",
+    "noSecurityEstablished",
+    "imsiRequestedInClear",
+    "ratDowngrade",
+    "acceptedWithoutAuth",
+    "abnormalReject",
+    "implausibleSignal",
+    "orphanCell"
+  ],
+  "gaps": [
+    {
+      "check": "sibNeighbourList",
+      "reason": "SIB neighbour lists and full measurement configurations are not decoded, so \"advertised neighbour\" cannot be read directly; the orphan-cell check falls back to measured neighbours and mobility context only."
+    },
+    {
+      "check": "asSecurityAlgorithm",
+      "reason": "The RRC Security Mode Command is decoded by name but its chosen AS ciphering/integrity algorithm is not exposed, so AS null-algorithm cannot be read; null-algorithm detection uses the NAS Security Mode Command."
+    },
+    {
+      "check": "sibAuthenticity",
+      "reason": "SIB1/SI are decoded for cell identity but not cross-checked for broadcast tampering (e.g. a spoofed cell barring or PLMN), which would need fields the current SIB decode does not surface."
+    }
+  ],
+  "ruleset": "fieldtap-security/1"
+}

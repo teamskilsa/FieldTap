@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { CaptureAnalysis } from "@engine/types";
 
-type CaptureTab = "overview" | "flow" | "radio";
+type CaptureTab = "overview" | "flow" | "radio" | "security";
 
 /** A request to draw attention to a moment on the timeline. `at` makes each request distinct from the last. */
 export interface Flash {

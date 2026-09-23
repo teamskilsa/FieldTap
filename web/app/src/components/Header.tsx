@@ -205,6 +205,7 @@ export function Header() {
             {analysis && <CommandItem onSelect={() => openTab("overview")}>Overview tab</CommandItem>}
             {analysis && <CommandItem onSelect={() => openTab("flow")}>Call flow tab<CommandShortcut>{analysis.events.length}</CommandShortcut></CommandItem>}
             {analysis && <CommandItem onSelect={() => openTab("radio")}>Radio tab<CommandShortcut>{analysis.phy.length}</CommandShortcut></CommandItem>}
+            {analysis && <CommandItem onSelect={() => openTab("security")}><ShieldCheck /> Security tab<CommandShortcut>fake base station</CommandShortcut></CommandItem>}
           </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Sample captures">
@@ -244,7 +245,7 @@ export function Header() {
             <CommandItem>Move the cursor 1 s<CommandShortcut>⇧ ← →</CommandShortcut></CommandItem>
             <CommandItem>Previous and next marker<CommandShortcut>[ ]</CommandShortcut></CommandItem>
             <CommandItem>Fit the whole capture<CommandShortcut>0</CommandShortcut></CommandItem>
-            <CommandItem>Overview, Call flow, Radio<CommandShortcut>1 2 3</CommandShortcut></CommandItem>
+            <CommandItem>Overview, Call flow, Radio, Security<CommandShortcut>1 2 3 4</CommandShortcut></CommandItem>
             <CommandItem>Search the messages<CommandShortcut>/</CommandShortcut></CommandItem>
             <CommandItem>Previous and next message<CommandShortcut>J K</CommandShortcut></CommandItem>
             <CommandItem>Open the focused card<CommandShortcut>Enter</CommandShortcut></CommandItem>

@@ -8,18 +8,20 @@ import { CaptureHeader } from "@/components/capture/CaptureHeader";
 import { CallFlowTab } from "@/components/capture/CallFlowTab";
 import { OverviewTab } from "@/components/capture/OverviewTab";
 import { RadioTab, type RadioSection } from "@/components/capture/RadioTab";
+import { SecurityTab } from "@/components/capture/SecurityTab";
 import { TrackView } from "@/components/journey/TrackView";
 import { fmtSince } from "@/lib/analysis/format";
+import { securityOf } from "@/lib/analysis/select";
 import { loadDevAnalysis } from "@/lib/analysis/dev-fixture";
 import { createSampleAnalysis, type SampleVariant } from "@/lib/analysis/sample";
 import { usePageMeta } from "@/lib/meta";
 import { useCapture } from "@/state/capture";
-import type { ImportProblem } from "@engine/types";
+import type { CaptureAnalysis, ImportProblem } from "@engine/types";
 
 const VARIANTS = new Set<SampleVariant>(["ok", "expiredSince", "traceGaps", "loggingOff", "notSysdiagnose"]);
 
-export type CaptureTab = "overview" | "flow" | "radio";
-const TABS = new Set<CaptureTab>(["overview", "flow", "radio"]);
+export type CaptureTab = "overview" | "flow" | "radio" | "security";
+const TABS = new Set<CaptureTab>(["overview", "flow", "radio", "security"]);
 const SECTIONS = new Set<RadioSection>([
   "Signal", "Downlink", "Uplink", "CSI", "NR", "Carriers", "Antennas", "RACH", "Not available",
 ]);
@@ -52,6 +54,8 @@ export interface CaptureSearch {
   section?: RadioSection | undefined;
   /** Dev only: load public/dev/analysis.json, a real capture that is never committed. */
   dev?: true | undefined;
+  /** Dev only: which dev fixture to load ('real' default, or 'flagged' for the synthetic suspicious capture). */
+  fixture?: "real" | "flagged" | undefined;
 }
 
 const num = (v: unknown): number | undefined => {
@@ -83,6 +87,7 @@ function parseSection(v: unknown): RadioSection | undefined {
 export function validateCaptureSearch(search: Record<string, unknown>): CaptureSearch {
   const sample = search["sample"];
   const dev = search["dev"];
+  const fixture = search["fixture"];
   const tab = search["tab"];
   const t = num(search["t"]);
   const w = parseWindow(search["w"]);
@@ -94,6 +99,7 @@ export function validateCaptureSearch(search: Record<string, unknown>): CaptureS
     ...(w ? { w: windowParam(w) } : {}),
     ...(section ? { section } : {}),
     dev: import.meta.env.DEV && (dev === "1" || dev === 1 || dev === true) ? true : undefined,
+    ...(import.meta.env.DEV && fixture === "flagged" ? { fixture: "flagged" as const } : {}),
   };
 }
 
@@ -123,14 +129,15 @@ export function CapturePage() {
   // Restore the sample on a reload, and load the dev fixture when asked for one.
   useEffect(() => {
     if (search.dev) {
-      if (analysis?.fileName.startsWith("dev:")) return;
-      void loadDevAnalysis().then(setAnalysis, (e: Error) => setDevError(e.message));
+      const which = search.fixture ?? "real";
+      if (analysis?.fileName.startsWith(`dev:${which}:`)) return;
+      void loadDevAnalysis(which).then(setAnalysis, (e: Error) => setDevError(e.message));
       return;
     }
     if (search.sample && (!analysis || !analysis.fileName.includes("_SAMPLE"))) {
       setAnalysis(createSampleAnalysis({ variant: search.sample }));
     }
-  }, [analysis, search.dev, search.sample, setAnalysis]);
+  }, [analysis, search.dev, search.fixture, search.sample, setAnalysis]);
 
   // Everything below the dock sticks to its real height, so nothing hides under it at any width (audit A21).
   useLayoutEffect(() => {
@@ -271,6 +278,7 @@ export function CapturePage() {
         case "1": goToTab("overview"); break;
         case "2": goToTab("flow"); break;
         case "3": goToTab("radio"); break;
+        case "4": goToTab("security"); break;
         case "?": setShortcuts((v) => !v); break;
         case "/":
           goToTab("flow");
@@ -360,6 +368,9 @@ export function CapturePage() {
             <TabsTrigger value="radio" className="tab-trigger">
               Radio <span className="num ml-1 text-[11px] text-[var(--text-3)]">{analysis.phy.length}</span>
             </TabsTrigger>
+            <TabsTrigger value="security" className="tab-trigger">
+              Security <SecurityDot analysis={analysis} />
+            </TabsTrigger>
           </TabsList>
         </div>
         <TabsContent value="overview" className="mt-4 min-w-0">
@@ -401,6 +412,9 @@ export function CapturePage() {
             }}
           />
         </TabsContent>
+        <TabsContent value="security" className="mt-4 min-w-0">
+          <SecurityTab analysis={analysis} onJump={jump} />
+        </TabsContent>
       </Tabs>
 
       <ShortcutsDialog open={shortcuts} onOpenChange={setShortcuts} />
@@ -413,7 +427,7 @@ const SHORTCUTS: [string, string][] = [
   ["Shift ← →", "Move the cursor 1 s"],
   ["[  ]", "Previous / next marker"],
   ["0", "Fit the whole capture"],
-  ["1  2  3", "Overview / Call flow / Radio"],
+  ["1  2  3  4", "Overview / Call flow / Radio / Security"],
   ["/", "Search the messages"],
   ["J  K", "Previous / next message (in the call flow)"],
   ["W  S", "Zoom the timeline in / out (while the dock has focus)"],
@@ -442,6 +456,20 @@ function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
         </dl>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A small verdict dot on the Security tab: green when clean, amber for a warning, red for suspicious. It never
+ *  shouts — a calm dot, not a count — so a clean capture (the common case) reads as reassuring. */
+function SecurityDot({ analysis }: { analysis: CaptureAnalysis }) {
+  const verdict = securityOf(analysis).verdict;
+  const color = verdict === "suspicious" ? "var(--critical)" : verdict === "warning" ? "var(--warning)" : "var(--good)";
+  return (
+    <span
+      className="ml-1.5 inline-block size-1.5 rounded-full align-middle"
+      style={{ background: color }}
+      aria-label={`Security: ${verdict}`}
+    />
   );
 }
 

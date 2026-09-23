@@ -807,6 +807,96 @@ export interface Availability {
   codes?: string[] | undefined;
 }
 
+// ------------------------------------------------------------------------------- security (fake base station)
+//
+// A local, no-network cross-check of the decoded RRC/NAS call flow for the Layer-3 signatures long associated
+// with IMSI catchers / fake base stations (the class SnoopSnitch and Darshak look for on Android): null or absent
+// ciphering, an IMSI asked for in the clear, a forced downgrade to 2G/3G, a registration accepted without any
+// security, a reject cause that pushes the phone off a real network, an implausibly strong serving cell, and a
+// cell reached with no mobility context. Every finding cites the exact decoded field(s) it read, and the ruleset
+// is deliberately conservative: a false alarm on a real network is worse than a miss, so a sophisticated catcher
+// that mimics a real cell can pass. This is not a guarantee, and the UI says so.
+
+/** trusted = nothing found; warning = an anomaly with an ordinary explanation; suspicious = a Layer-3 catcher tell. */
+export type SecurityVerdict = 'trusted' | 'warning' | 'suspicious';
+
+/** A finding's own weight. 'info' never lowers a verdict; 'warning' -> warning; 'suspicious' -> suspicious. */
+export type SecuritySeverity = 'info' | 'warning' | 'suspicious';
+
+/** The checks this engine can support from the current RRC/NAS + cell + PHY decode. */
+export type SecurityCheckId =
+  /** A NAS Security Mode Command that chose EEA0 (null ciphering) or EIA0 (null integrity). */
+  | 'nullCipher'
+  /** A registration/attach was accepted but no Security Mode Command (RRC or NAS) was ever seen. */
+  | 'noSecurityEstablished'
+  /** An Identity Request for the IMSI before security was established. */
+  | 'imsiRequestedInClear'
+  /** A forced redirection/reselection down to GERAN (2G) or UTRAN (3G) while on LTE/NR. */
+  | 'ratDowngrade'
+  /** An accept with no Authentication and no prior security context (the request was not integrity protected). */
+  | 'acceptedWithoutAuth'
+  /** A NAS reject whose cause pushes the phone off a legitimate network (#3/#6/#7/#8/#11..#15). */
+  | 'abnormalReject'
+  /** A serving-cell signal stronger than any real macro cell delivers, sustained over several samples. */
+  | 'implausibleSignal'
+  /** A cell the phone connected on that was reached by no normal mobility and appears in no neighbour evidence. */
+  | 'orphanCell';
+
+/** One anomaly, tied to the decoded evidence that raised it. `id` is unique within a report. */
+export interface SecurityFinding {
+  id: string;
+  check: SecurityCheckId;
+  severity: SecuritySeverity;
+  /** A short label ('Null ciphering'). */
+  title: string;
+  /** One plain-language sentence a non-specialist can act on. */
+  explanation: string;
+  /** The exact decoded field(s) this verdict read ('NAS Security Mode Command: Ciphering = EEA0'). */
+  evidence: string[];
+  /** The cell the finding is attributed to, when it belongs to one. */
+  cell?: Cell | undefined;
+  /** Index into `events`, when one message raised it. */
+  event?: number | undefined;
+  tMs?: number | undefined;
+}
+
+/** The per-cell roll-up: the worst finding on the cell decides its verdict. */
+export interface SecurityCellVerdict {
+  cell: Cell;
+  /** 'B2', 'n77'. */
+  band?: string | undefined;
+  verdict: SecurityVerdict;
+  findings: SecurityFinding[];
+}
+
+/** A candidate check the current decode cannot yet support, kept in the report so the gap is visible, not hidden. */
+export interface SecurityGap {
+  check: string;
+  reason: string;
+}
+
+/**
+ * The local security report. It is computed on this device from the already-decoded analysis and reaches no
+ * network: enabling an external cell-database cross-check (see security/external.ts) is a separate, opt-in step
+ * that is off by default and would send coarse cell IDs off-device with explicit consent.
+ */
+export interface SecurityReport {
+  /** The whole-capture verdict: the worst of the per-cell and unattached findings. */
+  verdict: SecurityVerdict;
+  /** One calm sentence for the banner. Most captures are clean and it says so. */
+  headline: string;
+  /** Per serving/connected cell, worst finding first. */
+  cells: SecurityCellVerdict[];
+  /** Findings not tied to a single cell. */
+  findings: SecurityFinding[];
+  /** Checks that ran (whether or not they fired), for transparency. */
+  checksRun: SecurityCheckId[];
+  /** Candidate checks the current RRC/NAS/PHY decode does not expose enough to support, with why. */
+  gaps: SecurityGap[];
+  /** The ruleset version, so an iOS port can match golden reports exactly. */
+  ruleset: string;
+}
+
 // ----------------------------------------------------------------------------------------------- the analysis
 
 export interface CaptureAnalysis {
@@ -852,4 +942,8 @@ export interface CaptureAnalysis {
 
   /** Wall-clock ms spent per stage, for the import sheet and performance notes. */
   timings: Partial<Record<ImportStage, number>>;
+
+  /** Local fake-base-station / IMSI-catcher check over the decoded call flow. Optional and back-compatible: a UI
+   *  or fixture from before this field simply has none, and the app recomputes it from the analysis when absent. */
+  security?: SecurityReport | undefined;
 }

@@ -21,6 +21,7 @@ import { TimeBase } from './diag/timebase.ts';
 import { attributeCarriers, buildJourney, type CaptureFacts, stepAnnotations } from './journey/build.ts';
 import { EMPTY_PHY_SUMMARY, extractPhy, type PhyCapture } from './phy/extract.ts';
 import { type DeframeOutput, QdssDeframer } from './qdss/deframer.ts';
+import { analyzeSecurity } from './security/report.ts';
 import { readFlow } from './signalling/callflow.ts';
 import { EMPTY_FLOW, type Flow } from './signalling/flow.ts';
 import { scrub } from './signalling/mask.ts';
@@ -181,6 +182,10 @@ export async function analyzeCapture(
     availability: phy.availability,
   } satisfies Partial<CaptureAnalysis>);
   if (deframed) analysis.deframe = deframed.stats;
+  // Local fake-base-station check over the assembled call flow, cells and PHY. No network, no storage; a bug here
+  // must not sink the analysis, so it is guarded like every other decoder and simply leaves `security` unset.
+  const security = guard<CaptureAnalysis['security']>(problems, 'radio', undefined, () => analyzeSecurity(analysis));
+  if (security) analysis.security = security;
   const startUtcMs = timeBase.startUtcMs;
   if (startUtcMs !== null) analysis.startUtc = new Date(startUtcMs).toISOString();
   analysis.problems = problems.sort((a, b) => Number(b.blocking) - Number(a.blocking));
