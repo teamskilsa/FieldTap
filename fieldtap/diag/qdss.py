@@ -30,6 +30,20 @@ Layer 3, the DIAG packets of a gathered message: ``98 01 00 00 <u32 n>`` wraps n
 log packet; ``9e 01 c2 00`` is a "secure" log whose body the modem encrypted (counted, never written); 0x79,
 0x99, 0x60 and 0x9d are messages, F3 text, events and command responses (counted).
 
+Resync, the one rule beyond the reference's defaults, ported behaviour for behaviour from the streaming TypeScript
+deframer (web/engine/src/qdss/deframer.ts). The reference settles one unit phase and keeps it for the whole
+stream. That holds for a trace whose chunks are all present, but not for one the sysdiagnose collector took files
+out of: the moving capture (08-57-25) is missing 3 of its 133 segments, and its phase slips 8 times, 3 at the holes
+and 5 mid-chunk; with one phase it yields 18,667 of its 85,000-odd records. So layer 2 also re-finds the phase when
+it loses sync, i.e. RESYNC_RUN consecutive units fail the tag check, scanning RESYNC_WINDOW bytes from the first
+unit of the bad run (the reference's own per-4 KB slip hunt, done in line), and at a hole in the chunk numbering
+(0x000061BE.bin, 0x000061BF.bin, ...). At either break the fragments in flight are closed for what they already
+hold (their leading bytes were read before the break) rather than thrown away, and the lanes are unbound. The
+rule is split-invariant: a resync decides on the same window of bytes whatever the chunk boundaries, as the
+TypeScript decides once RESYNC_WINDOW bytes have arrived and only a hole or the end of the stream makes it decide
+on less. It cannot fire on a whole trace (the first capture has no bad unit in 5.4 M), so such a trace deframes
+byte for byte as before, and the resync keys appear in the stats only when a resync happened.
+
 Records are written in the order of an effective timestamp: the modem's own where it is plausible, otherwise the
 last plausible one on the same channel, because channels interleave with a lag.
 """
@@ -64,6 +78,16 @@ TARGET_CODES = (0xB0C0, 0xB0C1, 0xB0C2, 0xB0E2, 0xB0E3, 0xB0EC, 0xB0ED, 0xB0E4, 
 
 _OTHER_KINDS = {0x79: "extmsg_0x79", 0x99: "qsr4_0x99", 0x60: "event_0x60", 0x9D: "cmd_0x9d"}
 
+#: find_phase's sample, 20,000 candidate units per phase, so the first PHASE_WINDOW bytes give the answer the
+#: whole stream gives; deframer.ts settles the phase there, or at the first hole when that comes sooner.
+PHASE_SAMPLE = 16 * 20000
+PHASE_WINDOW = PHASE_SAMPLE + 16 + 15
+#: Consecutive units failing the tag check that mean the phase has slipped, not that one unit is damaged: a
+#: correctly phased stream has essentially none (the first capture: 0 in 5,411,059), so 8 is already decisive.
+RESYNC_RUN = 8
+#: Bytes scanned to re-find the phase, as the reference's slip hunt scanned per 4 KB: 256 candidate units per phase.
+RESYNC_WINDOW = 4096
+
 
 @dataclass
 class DeframeResult:
@@ -77,9 +101,11 @@ class DeframeResult:
 
 # --- layer 1 ------------------------------------------------------------------------------------------------
 
-def deformat(paths: Sequence[str], want: int = ATID) -> bytes:
-    """The bytes of trace ID ``want``, with the formatter state carried from one chunk into the next."""
+def deformat_chunks(paths: Sequence[str], want: int = ATID) -> tuple[bytes, list[int]]:
+    """The bytes of trace ID ``want``, with the formatter state carried from one chunk into the next, and the
+    stream offset at which each chunk's bytes end: where a hole in the chunk numbering sits in the stream."""
     out = bytearray()
+    ends = []
     cur = None
     for path in paths:
         with open(path, "rb") as fh:
@@ -118,12 +144,18 @@ def deformat(paths: Sequence[str], want: int = ATID) -> bytes:
                     out.append(x | bit)
                     if i < 7:
                         out.append(b[k + 2 * i + 1])
-    return bytes(out)
+        ends.append(len(out))
+    return bytes(out), ends
+
+
+def deformat(paths: Sequence[str], want: int = ATID) -> bytes:
+    """The bytes of trace ID ``want`` over the chunks."""
+    return deformat_chunks(paths, want)[0]
 
 
 # --- layer 2 ------------------------------------------------------------------------------------------------
 
-def find_phase(s: bytes, sample: int = 16 * 20000) -> int:
+def find_phase(s: bytes, sample: int = PHASE_SAMPLE) -> int:
     """The offset (0..15) at which 16-byte units line up: the one where most units have a known shape."""
     best = None
     for p in range(16):
@@ -175,37 +207,98 @@ def assemble(start: bytes, conts: Sequence[bytes]) -> tuple:
     return bytes(out[:length]), k, remaining <= 0
 
 
-def iter_fragments(s: bytes, phase: int, stats: collections.Counter) -> Iterator[tuple]:
-    """(offset, channel, start unit, [continuation units]) of every fragment, in the order they close."""
-    end = len(s) - 15
+def iter_fragments(s: bytes, phase: int, stats: collections.Counter,
+                   gaps: Sequence[int] = ()) -> Iterator[Optional[tuple]]:
+    """(offset, channel, start unit, [continuation units]) of every fragment, in the order they close.
+
+    ``gaps`` are the stream offsets where chunk files are missing (:func:`chunk_gaps`); ``phase`` is the unit
+    phase of the stream's head (:func:`find_phase` over its first PHASE_WINDOW bytes, or over what precedes the
+    first hole when that comes sooner, which is where deframer.ts settles it). The phase is re-found after every
+    hole and after every run of RESYNC_RUN units that fail the tag check (a slip), over RESYNC_WINDOW bytes from
+    the first unit of the run, or over what is left before the next hole or the end of the stream. At either break
+    nothing more arrives for what is in flight: the open fragments are yielded as they stand, in opening order,
+    then ``None`` once, meaning that what is gathering on every channel is left open too, and the lanes are
+    unbound. The stats are counted in the order deframer.ts counts them, so they serialise the same.
+    """
     chan = {}                                             # lane -> channel it is bound to
     open_ = {}                                            # channel -> [offset, channel, start, conts]
-    for i in range(phase, end, 16):
-        h = s[i]
-        t = h & 0x1F
-        if t == 0x00:
-            stats["u_fill"] += 1
-            continue
-        lane = h >> 5
-        if t == 0x02:
-            stats["u_chan"] += 1
-            chan[lane] = s[i + 1] | s[i + 2] << 8
-            continue
-        key = chan.get(lane)
-        if t == 0x13:
-            stats["u_start"] += 1
-            if key in open_:
-                yield tuple(open_.pop(key))
-            open_[key] = [i, key, s[i:i + 16], []]
-        elif t == 0x03:
-            stats["u_cont"] += 1
-            m = open_.get(key)
-            if m is None:
-                stats["u_cont_orphan"] += 1
-            else:
-                m[3].append(s[i:i + 16])
-        else:
-            stats["u_badtype"] += 1
+    bad_run = 0                                           # units failing the tag check in a row
+    resync = None                                         # stream offset the phase is being re-found from
+    bounds = list(gaps) + [len(s)]
+    i = phase
+    for k, seg_end in enumerate(bounds):
+        hole = k < len(gaps)                              # the segment ends at a hole, not at the stream's end
+        counted = False                                   # that hole is in the stats already
+        if k == 0:
+            if hole and seg_end < PHASE_WINDOW:           # settled at the hole, which is counted first
+                stats["chunk_gaps"] += 1
+                counted = True
+            stats["phase"] = phase
+        while True:
+            if resync is not None:
+                have = seg_end - resync
+                if have < RESYNC_WINDOW + 16 and hole and not counted:
+                    stats["chunk_gaps"] += 1              # the hole forces the decision on what there is
+                    counted = True
+                p = find_phase(s[resync:resync + min(have, RESYNC_WINDOW + 16)])
+                # Phase 0 is the alignment that just failed, so no better one is in view: step over the bad run
+                # instead, so the scan always moves forward and a long damaged stretch cannot loop.
+                stats["resync_kept_phase" if p == 0 else "resync_new_phase"] += 1
+                i = min(resync + (RESYNC_RUN * 16 if p == 0 else p), seg_end)
+                resync = None
+            slipped = False
+            for i in range(i, seg_end - 15, 16):
+                h = s[i]
+                t = h & 0x1F
+                if t == 0x00:
+                    stats["u_fill"] += 1
+                elif t == 0x02:
+                    stats["u_chan"] += 1
+                    chan[h >> 5] = s[i + 1] | s[i + 2] << 8
+                elif t == 0x13:
+                    stats["u_start"] += 1
+                    key = chan.get(h >> 5)
+                    if key in open_:
+                        yield tuple(open_.pop(key))
+                    open_[key] = [i, key, s[i:i + 16], []]
+                elif t == 0x03:
+                    stats["u_cont"] += 1
+                    m = open_.get(chan.get(h >> 5))
+                    if m is None:
+                        stats["u_cont_orphan"] += 1
+                    else:
+                        m[3].append(s[i:i + 16])
+                else:
+                    stats["u_badtype"] += 1
+                    bad_run += 1
+                    if bad_run >= RESYNC_RUN:
+                        slipped = True
+                        break
+                    continue                              # a bad unit does not end the run
+                bad_run = 0
+            if not slipped:
+                break
+            # The phase has slipped: every unit since the run began was read at the wrong offset.
+            stats["resync_slip"] += 1
+            bad_run = 0
+            for m in open_.values():
+                yield tuple(m)
+            open_.clear()
+            yield None
+            chan.clear()
+            resync = i - (RESYNC_RUN - 1) * 16
+        if hole:
+            # The stream jumps here, and a unit straddling the hole can never be completed.
+            if not counted:
+                stats["chunk_gaps"] += 1
+            stats["resync_gap"] += 1
+            bad_run = 0
+            for m in open_.values():
+                yield tuple(m)
+            open_.clear()
+            yield None
+            chan.clear()
+            resync = seg_end
     for m in open_.values():
         yield tuple(m)
 
@@ -263,17 +356,36 @@ def classify(pkt: bytes) -> tuple:
 
 # --- the whole trace ----------------------------------------------------------------------------------------
 
+def chunk_number(path: str) -> Optional[int]:
+    """The segment number in a chunk's name (0x000061BE.bin -> 0x61BE); None for another name."""
+    name = os.path.basename(path)
+    return int(name[2:-4], 16) if CHUNK_NAME.fullmatch(name) else None
+
+
+def chunk_gaps(paths: Sequence[str], ends: Sequence[int]) -> list[int]:
+    """The stream offsets at which chunk files are missing: a chunk numbered other than the previous one plus
+    one begins after a hole, at the offset where the previous chunk's bytes end (:func:`deformat_chunks`)."""
+    gaps = []
+    previous = None
+    for k, path in enumerate(paths):
+        number = chunk_number(path)
+        if previous is not None and number is not None and number != previous + 1:
+            gaps.append(ends[k - 1])
+        previous = number
+    return gaps
+
+
 def deframe_chunks(paths: Sequence[str]) -> DeframeResult:
     """Deframe the chunks, given in trace order, into DIAG log records."""
-    s = deformat(paths)
+    s, ends = deformat_chunks(paths)
+    gaps = chunk_gaps(paths, ends)
     stats = collections.Counter()
     fits = collections.Counter()
     kinds = collections.Counter()
     pkts = collections.Counter()
     found = []                                            # (channel, code, ts, body, complete)
     secure = []
-    phase = find_phase(s)
-    stats["phase"] = phase
+    phase = find_phase(s[:gaps[0]] if gaps and gaps[0] < PHASE_WINDOW else s)
 
     def emit(key, msg, complete, tag):
         stats["messages" + ("_" + tag if tag else "")] += 1
@@ -288,7 +400,19 @@ def deframe_chunks(paths: Sequence[str]) -> DeframeResult:
                 secure.append((code, ts))
 
     pending = {}                                          # channel -> [bytearray, complete]
-    for _off, key, start, conts in iter_fragments(s, phase, stats):
+
+    def left_open():
+        """Nothing more arrives for what is gathering: at a break in the stream, and at its end."""
+        for key, p in pending.items():
+            stats["gather_left_open"] += 1
+            emit(key, bytes(p[0]), p[1], "unterm")
+        pending.clear()
+
+    for fragment in iter_fragments(s, phase, stats, gaps):
+        if fragment is None:
+            left_open()
+            continue
+        _off, key, start, conts = fragment
         cls = start[1]
         kind = cls & 0xF
         length = start[2] | start[3] << 8
@@ -330,9 +454,7 @@ def deframe_chunks(paths: Sequence[str]) -> DeframeResult:
             stats["gather_unknown_kind_%d" % kind] += 1
             continue
         emit(key, msg, complete, "")
-    for key, p in pending.items():
-        stats["gather_left_open"] += 1
-        emit(key, bytes(p[0]), p[1], "unterm")
+    left_open()
 
     codes = collections.Counter(r[1] for r in found)
     ts_kinds = collections.Counter(
