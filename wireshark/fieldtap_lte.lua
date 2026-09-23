@@ -206,6 +206,9 @@ end
 
 local function na(v)
   if v == nil then return "n/a" end
+  -- integer-valued numbers render without a trailing ".0" (Lua numbers are floats);
+  -- discrete fields (PCI, MCS, subframe, LCID) are whole numbers, continuous ones use %.1f elsewhere
+  if type(v) == "number" and v == math.floor(v) then return string.format("%d", v) end
   return tostring(v)
 end
 
@@ -1043,7 +1046,7 @@ local function decode_mac_tb(body, tree, downlink)
         local rows, hdr_note = parse_subheaders(hdr, downlink)
         local lcids = {}
         for _, row in ipairs(rows) do
-          lcids[#lcids + 1] = tostring(row.lcid)
+          lcids[#lcids + 1] = string.format("%d", row.lcid)
           local htree = stree:add(hdr(row.from, row.len), string.format("Sub-header LCID %d (%s)", row.lcid, row.lcid_name))
           add(htree, "subhdr.sample", hdr(row.from, 1), s.sample)
           add(htree, "subhdr.lcid", hdr(row.from, 1), row.lcid)
@@ -1147,7 +1150,7 @@ local function decode_dl_tb_v50(body, tree)
         local lcid = bits(word, 1, 6)
         sdu_rows[#sdu_rows + 1] = { at = p, tb = tb.tb, control = bits(word, 0, 1), lcid = lcid, lcid_name = lcid_name(lcid, true),
                                     length_bytes = bits(word, 7, 16) }
-        lcids[#lcids + 1] = tostring(lcid)
+        lcids[#lcids + 1] = string.format("%d", lcid)
         if p + SDU_DESCRIPTOR_BYTES <= n then tail = tail + 8 * body(p + 9, 1):uint() end
       end
       tb.lcids = join(lcids, ",")
@@ -1451,7 +1454,7 @@ local function decode_pusch_v162(body, tree, fields)
     for _, lim in ipairs({ { "sfn", 0, 1023 }, { "num_rbs", 0, 110 }, { "coding_rate", 0, 2 } }) do
       local v = g[lim[1]]
       if v < lim[2] or v > lim[3] then
-        bad[#bad + 1] = string.format("grant%d.%s=%s", i, lim[1], tostring(v))
+        bad[#bad + 1] = string.format("grant%d.%s=%s", i, lim[1], na(v))
         g[lim[1]] = nil
       end
     end
@@ -1523,7 +1526,7 @@ D[0xB139] = function(body, pinfo, tree, ctx)
                            { "tx_power_dbm", -60, 33 } }) do
       local v = g[lim[1]]
       if v < lim[2] or v > lim[3] then
-        bad[#bad + 1] = string.format("grant%d.%s=%s", i, lim[1], tostring(v))
+        bad[#bad + 1] = string.format("grant%d.%s=%s", i, lim[1], na(v))
         g[lim[1]] = nil
       end
     end
