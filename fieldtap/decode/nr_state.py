@@ -17,6 +17,7 @@ import struct
 from typing import Optional
 
 from ..diag.protocol import LogRecord
+from .nr_common import DOC_NOTE
 from .records import DiagRecord
 
 STATE_LAYOUT_LEN = 26        # u32 version + 22 bytes of body
@@ -66,7 +67,7 @@ def decode_mm5g_state(rec: LogRecord, info=None) -> Optional[DiagRecord]:
             }
             return DiagRecord(rec.code, info.name if info else "NR NAS MM5G State", version, rec.timestamp,
                               rec.timestamp_raw, body, fields=fields, decoded="fields",
-                              confidence=info.confidence if info else "medium")
+                              confidence=info.confidence if info else "medium", note=DOC_NOTE)
     # Not the state layout: the NAS locator, as this code was decoded before.
     from . import nas
     return nas.decode(rec, info)
