@@ -10,6 +10,9 @@ enum CaptureLaunchOptions {
     static let guideStep: Int? = value("-FTGuideStep").flatMap { Int($0) }
     static let countdownSeconds: Double? = value("-FTCountdown").flatMap { Double($0) }
     static let whySheet = ProcessInfo.processInfo.arguments.contains("-FTWhySheet")
+    /// An anchor id to scroll the Modem logging guide to (e.g. "oneGesture"), so a card below the fold can be
+    /// screenshotted.
+    static let scrollTo: String? = value("-FTScrollTo")
 
     private static func value(_ key: String) -> String? {
         let args = ProcessInfo.processInfo.arguments

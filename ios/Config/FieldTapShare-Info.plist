@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with the keys Xcode generates (GENERATE_INFOPLIST_FILE = YES). -->
+	<key>CFBundleDisplayName</key>
+	<string>FieldTap</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+		<!-- Code-only extension: no storyboard, the principal class builds its own view. -->
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- Activate only for a single gzip/tar archive (a sysdiagnose_*.tar.gz resolves to
+			     org.gnu.gnu-zip-archive). We deliberately do NOT match public.data here, which would make
+			     FieldTap appear for every file in the share sheet; public.data is only a fallback used when
+			     extracting the file the extension is given. -->
+			<key>NSExtensionActivationRule</key>
+			<string>SUBQUERY (
+    extensionItems,
+    $extensionItem,
+    SUBQUERY (
+        $extensionItem.attachments,
+        $attachment,
+        ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "org.gnu.gnu-zip-archive"
+        || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "org.gnu.gnu-zip-tar-archive"
+        || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.tar-archive"
+    ).@count == 1
+).@count == 1</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -95,6 +95,39 @@ public enum CaptureWording {
         guard let ms, ms > 0 else { return nil }
         return String(format: "%.1f s trace", ms / 1_000)
     }
+
+    // MARK: One-gesture capture (R2)
+    //
+    // The sysdiagnose trigger is the three-button chord, which is awkward to hit at the right moment. iOS has
+    // two public Accessibility features that fire the same trigger from a single gesture, so the customer can
+    // press once. The words live here so the guide, the first-capture card and the import help never disagree.
+
+    public static let oneGestureTitle = "One tap instead of three buttons"
+
+    public static let oneGestureIntro = """
+        Holding all three buttons at the right moment is fiddly. iOS can fire the same sysdiagnose from a single \
+        gesture, so you press once. Set up either one below — the three-button chord still works as a fallback.
+        """
+
+    /// Back Tap on the back of the phone, bound to the Accessibility Shortcut that takes a sysdiagnose.
+    public static let backTapSteps = """
+        Back Tap: open Settings > Accessibility > Touch > Back Tap > Double Tap, and choose Accessibility \
+        Shortcut. Then set the Accessibility Shortcut (Settings > Accessibility > Accessibility Shortcut) to the \
+        logging option. Now a double tap on the back of your iPhone takes the sysdiagnose.
+        """
+
+    /// AssistiveTouch's on-screen button with a custom action.
+    public static let assistiveTouchSteps = """
+        AssistiveTouch: open Settings > Accessibility > Touch > AssistiveTouch and turn it on. Under Custom \
+        Actions, assign the logging option to a single tap, double tap or long press. Tapping the on-screen \
+        button then takes the sysdiagnose.
+        """
+
+    /// The chord, kept as the fallback everyone can use.
+    public static let chordFallback = """
+        Fallback (works on every iPhone): press both volume buttons and the side button together, briefly, until \
+        you feel a short buzz. Don't hold them — holding starts Emergency SOS.
+        """
 }
 
 /// The capture card's journey digest and mini-strip data, from the analysis at import time.

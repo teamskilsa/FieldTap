@@ -48,6 +48,14 @@ public struct ProfileState: Hashable, Codable, Sendable {
         guard let removal = removalDate else { return nil }
         return max(0, Int((removal.timeIntervalSince(now) / 86_400).rounded(.down)))
     }
+
+    /// When the "logging expires soon" reminder should fire: `expiringSoonInterval` (a day) before removal,
+    /// but at least a minute from `now` so a near-expiry profile still notifies right away. Nil when there is no
+    /// removal date or it has already passed.
+    public func expiryReminderDate(now: Date = Date()) -> Date? {
+        guard let removal = removalDate, removal > now else { return nil }
+        return max(removal.addingTimeInterval(-Self.expiringSoonInterval), now.addingTimeInterval(60))
+    }
 }
 
 /// Why an import could not give a usable modem trace, or what the user should know about it. Each has a

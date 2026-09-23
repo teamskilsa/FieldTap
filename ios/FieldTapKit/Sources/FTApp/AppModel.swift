@@ -1,6 +1,7 @@
 import Foundation
 import FTModel
 import FTPresentation
+import FTCapture
 
 /// A file the user asked to import: from the share sheet or "Open in" (copied into Documents/Inbox, not
 /// security scoped) or from the Files importer (security scoped).
@@ -91,6 +92,23 @@ public final class AppModel {
 
     public func requestImport(_ url: URL, securityScoped: Bool) {
         pendingImport = ImportRequest(url: url, securityScoped: securityScoped)
+    }
+
+    /// Picks up a sysdiagnose the FieldTapShare extension dropped in the App Group Inbox and starts the normal
+    /// import for it, so the customer does not have to open Files and pick the file again. Safe to call on launch
+    /// and on every foreground: a no-op when the App Group is empty or an import is already open, and one capture
+    /// is never imported twice (`SharedInboxIngest.claimNext` moves it out of the shared Inbox as it claims it).
+    public func ingestSharedInbox() {
+        guard pendingImport == nil, importPreview == nil else { return }
+        guard let shared = SharedInbox.inboxURL() else { return }
+        do {
+            if let moved = try SharedInboxIngest.claimNext(fromShared: shared, into: ImportLeftovers.inboxURL) {
+                // Landed in the app's own Documents/Inbox, so the importer deletes it when the import finishes.
+                requestImport(moved, securityScoped: false)
+            }
+        } catch {
+            lastError = "Could not open the shared sysdiagnose: \(error.localizedDescription)"
+        }
     }
 
     /// DEBUG/Harness: loads a fixture folder as a capture (FixtureLoader) and lists it first.

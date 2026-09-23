@@ -5,6 +5,7 @@ import FTCapture
 @main
 struct FieldTapApp: App {
     @State private var app = AppEnvironment.makeModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -16,7 +17,13 @@ struct FieldTapApp: App {
                     #else
                     app.refresh()
                     #endif
+                    // A sysdiagnose shared to FieldTap while it was closed waits in the App Group Inbox.
+                    app.ingestSharedInbox()
                     app.launchSettled = true
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // The share happens in another process; pick up anything it left each time we come forward.
+                    if phase == .active { app.ingestSharedInbox() }
                 }
                 .onOpenURL { url in
                     // "Share > FieldTap" and "Open in" hand over a copy in Documents/Inbox (opening in place is off);

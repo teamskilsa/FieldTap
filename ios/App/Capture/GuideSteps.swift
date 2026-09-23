@@ -78,7 +78,8 @@ enum GuideContent {
     static let capture: [GuideStep] = [
         GuideStep(id: "press", symbol: "hand.tap", title: "Press the buttons first",
                   text: "Press both volume buttons and the side button together, briefly, until you feel a short buzz. "
-                      + "Press before the problem, not after it — the next step says when.",
+                      + "Press before the problem, not after it — the next step says when. "
+                      + "Set up a one-tap shortcut below to skip the three-button chord.",
                   button: "I pressed the buttons", action: .startCountdown,
                   trouble: [.init(problem: "No buzz?",
                                   fix: "Press all three at the same moment and let go right away. Holding them down starts Emergency SOS, so don't hold them.")]),
@@ -207,6 +208,45 @@ struct TrailingIconLabelStyle: LabelStyle {
         HStack(spacing: 6) {
             configuration.title
             if showIcon { configuration.icon }
+        }
+    }
+}
+
+/// The one-gesture capture step (R2): set up Back Tap or AssistiveTouch so a sysdiagnose is a single gesture,
+/// with the three-button chord kept as the fallback. All wording is `CaptureWording`, the one place it lives.
+struct OneGestureCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "hand.tap")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 52, height: 52)
+                    .background(Theme.accent.opacity(0.12), in: .rect(cornerRadius: 16, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(CaptureWording.oneGestureTitle).font(.title3.weight(.semibold))
+                    Text(CaptureWording.oneGestureIntro).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            option("1", "circle.circle", CaptureWording.backTapSteps)
+            option("2", "circle.grid.cross", CaptureWording.assistiveTouchSteps)
+            Text(CaptureWording.chordFallback)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("oneGestureCard")
+    }
+
+    private func option(_ number: String, _ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(Theme.accent).frame(width: 22)
+            Text(text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
         }
     }
 }

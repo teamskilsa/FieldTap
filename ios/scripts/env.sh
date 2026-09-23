@@ -42,7 +42,8 @@ export FT_SYSDIAGNOSE FT_SIM_NAME
 FT_TMP="/private/tmp/fieldtap-build/${FT_WP:-local}"
 export FT_TMP
 
-export FT_BUNDLE_ID=com.fieldtap.ios
+# The app's real bundle id (the project's PRODUCT_BUNDLE_IDENTIFIER); the share extension is <id>.share.
+export FT_BUNDLE_ID=com.fieldtap.app
 
 # Stop heavy steps below this much free space in the home volume (GB).
 export FT_MIN_FREE_GB=3

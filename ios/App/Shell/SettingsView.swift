@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var confirmReveal = false
     @State private var confirmDelete = false
     @State private var storageBytes: Int64 = 0
+    @AppStorage("ft.reminder.expiry") private var remindExpiry = false
 
     var body: some View {
         Form {
@@ -21,6 +22,15 @@ struct SettingsView: View {
                 Text(app.revealIdentifiers
                      ? "Shown until FieldTap is closed. They are included when you copy or share a message."
                      : "Masked (recommended). IMSI, IMEI, phone number, IP addresses, tracking area and cell identity show as <masked> on every screen and in everything you copy or share.")
+            }
+
+            Section {
+                Toggle("Remind me before logging expires", isOn: reminderBinding)
+                    .accessibilityIdentifier("remindExpirySetting")
+            } header: {
+                Text("Reminders")
+            } footer: {
+                Text(reminderFooter)
             }
 
             Section("Storage") {
@@ -75,6 +85,30 @@ struct SettingsView: View {
             Text("Frees \(ByteCountFormatter.string(fromByteCount: storageBytes, countStyle: .file)). This cannot be undone.")
         }
         .task(id: app.captures.count) { storageBytes = app.storageBytes() }
+    }
+
+    private var reminderFooter: String {
+        if let removal = app.latest?.profile?.removalDate {
+            return "One notification about a day before Apple's logging profile expires (\(ModemLoggingStatus.format(removal))), so you can renew it before your next test."
+        }
+        return "One notification about a day before Apple's logging profile expires, so you can renew it before your next test. It's scheduled from your newest import."
+    }
+
+    /// Turning the reminder on asks for notification permission the first time and schedules from the newest
+    /// profile; turning it off cancels it. Mirrors the toggle in the Modem logging guide (same defaults key).
+    private var reminderBinding: Binding<Bool> {
+        Binding(get: { remindExpiry }, set: { on in
+            remindExpiry = on
+            let profile = app.latest?.profile
+            Task { @MainActor in
+                if on {
+                    guard await ProfileReminder.requestPermission() else { remindExpiry = false; return }
+                    if let profile { await ProfileReminder.scheduleExpiry(profile) }
+                } else {
+                    ProfileReminder.cancelExpiry()
+                }
+            }
+        })
     }
 
     /// Turning reveal on asks first; turning it off does not.

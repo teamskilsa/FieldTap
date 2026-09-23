@@ -26,6 +26,7 @@ struct ModemLoggingGuideView: View {
         let profile = app.latest?.profile
         let doneKey = Self.key(state, app.latest)
         let showSetup = state.needsSetup && doneFor != doneKey
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 16) {
                 if let countdown = CaptureCoach.running(pressedAt) {
@@ -42,6 +43,7 @@ struct ModemLoggingGuideView: View {
                         setupStep = 0
                     }
                     StepList(title: "Then record a problem", steps: GuideContent.capture, footnote: TimingNote.short)
+                    OneGestureCard().id("oneGesture")
                 } else {
                     if state.needsSetup {
                         Label("You've set it up. Your next import will confirm modem logging is on.",
@@ -51,6 +53,7 @@ struct ModemLoggingGuideView: View {
                     }
                     StepFlow(title: "Record a problem", steps: GuideContent.capture, index: $captureStep,
                              onFinish: { captureStep = 0 }, onStartCountdown: startCountdown)
+                    OneGestureCard().id("oneGesture")
                     TimingNote(latest: app.latest)
                     StepList(title: "Renew or set up again", steps: setupSteps(profile),
                              footnote: "Apple's page opens in Safari from step 1.")
@@ -68,8 +71,19 @@ struct ModemLoggingGuideView: View {
         .sheet(isPresented: $showWhy) {
             WhyNotBundledSheet(profile: profile)
         }
-        .onAppear { applyState(state) }
+        .onAppear {
+            applyState(state)
+            #if DEBUG || FT_HARNESS
+            // Screenshots: bring a card below the fold (e.g. the one-gesture step) into view.
+            if let anchor = CaptureLaunchOptions.scrollTo {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation { proxy.scrollTo(anchor, anchor: .top) }
+                }
+            }
+            #endif
+        }
         .onChange(of: state.token) { applyState(app.guideState()) }
+        }
     }
 
     private func setupSteps(_ profile: ProfileState?) -> [GuideStep] {

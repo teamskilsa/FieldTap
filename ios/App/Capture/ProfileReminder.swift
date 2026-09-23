@@ -16,10 +16,11 @@ enum ProfileReminder {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
     }
 
-    /// A day before iOS removes Apple's profile; right away when that is already less than a day off.
+    /// A day before iOS removes Apple's profile; right away when that is already less than a day off. The fire
+    /// date is `ProfileState.expiryReminderDate`, so the timing is one tested function.
     static func scheduleExpiry(_ profile: ProfileState) async {
-        guard let removal = profile.removalDate, removal > Date() else { return }
-        let lead = max(60, removal.addingTimeInterval(-ProfileState.expiringSoonInterval).timeIntervalSinceNow)
+        guard let removal = profile.removalDate, let fireAt = profile.expiryReminderDate() else { return }
+        let lead = max(1, fireAt.timeIntervalSinceNow)
         let when = removal.formatted(.dateTime.weekday(.wide).hour().minute())
         await add(expiryId, after: lead, title: "Modem logging ends soon",
                   body: "Apple's logging profile expires \(when). Renew it in FieldTap's Modem logging guide before your next test.")
