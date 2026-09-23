@@ -185,7 +185,7 @@ Deno.test('analyzeArchive: cancelling rejects with an AbortError', async () => {
 
 Deno.test('worker.ts + index.ts: analyzeFile runs the analysis in a Web Worker and resolves with plain data', async () => {
   const gz = await gzip(buildTar(syntheticSysdiagnose()));
-  const file = new File([gz], `${ROOT}.tar.gz`, { type: 'application/gzip' });
+  const file = new File([new Uint8Array(gz)], `${ROOT}.tar.gz`, { type: 'application/gzip' });
   // Browsers clone the File into the worker; Deno cannot clone a Blob, so this test's worker is handed the same
   // bytes as an ArrayBuffer (the other form WorkerRequest accepts).
   const makeWorker = () => {

@@ -35,7 +35,7 @@ export async function zipEntry(zip: Uint8Array, name: (entry: string) => boolean
     const raw = zip.subarray(start, start + size);
     if (method === 0) return { name: entry, data: raw.slice() };
     if (method !== 8) throw new Error(`zip method ${method} not supported`);
-    const out = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const out = new Blob([new Uint8Array(raw)]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     return { name: entry, data: new Uint8Array(await new Response(out).arrayBuffer()) };
   }
   return null;

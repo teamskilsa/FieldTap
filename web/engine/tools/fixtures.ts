@@ -5,8 +5,9 @@
 //   FT_ARCHIVES           directory holding the real sysdiagnose archives (default ~/Downloads)
 //   FT_REQUIRE_FIXTURES=1 a missing fixture fails its test instead of skipping it (use on the fixture machine)
 
+import { localPath } from './local_path.ts';
 export const FIXTURES = Deno.env.get('FT_FIXTURES') ??
-  new URL('../../../ios/Fixtures/local', import.meta.url).pathname;
+  localPath(new URL('../../../ios/Fixtures/local', import.meta.url));
 
 export const ARCHIVES = Deno.env.get('FT_ARCHIVES') ?? `${Deno.env.get('HOME') ?? ''}/Downloads`;
 

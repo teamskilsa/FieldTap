@@ -128,9 +128,9 @@ export async function gzip(data: Uint8Array): Promise<Uint8Array> {
 }
 
 /** A stream delivering `data` in pieces of the given sizes (cycled), or in one piece. */
-export function streamOf(data: Uint8Array, sizes: number[] = [data.length || 1]): ReadableStream<Uint8Array> {
+export function streamOf(data: Uint8Array, sizes: number[] = [data.length || 1]): ReadableStream<Uint8Array<ArrayBuffer>> {
   let at = 0, k = 0;
-  return new ReadableStream<Uint8Array>({
+  return new ReadableStream<Uint8Array<ArrayBuffer>>({
     pull(controller) {
       if (at >= data.length) return controller.close();
       const n = Math.max(1, sizes[k++ % sizes.length]);

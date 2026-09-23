@@ -20,6 +20,7 @@ import { buildJourney, type CaptureFacts, stepAnnotations } from '../src/journey
 import { attributeCarriers } from '../src/journey/attribution.ts';
 import { PHY_METRICS } from '../src/phy/metrics.ts';
 import { availability } from '../src/phy/catalog.ts';
+import { localPath } from './local_path.ts';
 import {
   type Cell,
   type CaptureAnalysis,
@@ -360,7 +361,7 @@ export function makeSample(fileName = 'sample_sysdiagnose.tar.gz'): CaptureAnaly
 }
 
 /** Where the website's asset is built, next to the engine bundle. */
-export const SAMPLE_PATH = new URL('../dist/sample-analysis.json', import.meta.url).pathname;
+export const SAMPLE_PATH = localPath(new URL('../dist/sample-analysis.json', import.meta.url));
 
 if (import.meta.main) {
   const i = Deno.args.indexOf('--out');

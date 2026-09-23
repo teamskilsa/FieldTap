@@ -6,8 +6,9 @@ import type { WorkerReply, WorkerRequest } from '../src/worker.ts';
 import { exists } from '../tools/fixtures.ts';
 import { assert, assertEquals } from './assert.ts';
 import { buildTar, gzip } from './support.ts';
+import { localPath } from '../tools/local_path.ts';
 
-const DIST = new URL('../dist', import.meta.url).pathname;
+const DIST = localPath(new URL('../dist', import.meta.url));
 const ROOT = 'sysdiagnose_2026.09.21_15-41-47-0400_iPhone-OS_iPhone_23F84';
 const QDSS = `${ROOT}/logs/Baseband/log-bb-2026-09-21-15-42-33-844-qdss`;
 

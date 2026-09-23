@@ -106,7 +106,7 @@ async function zip(entries: { name: string; data: Uint8Array; deflate?: boolean 
   const locals: Uint8Array[] = [], central: Uint8Array[] = [];
   let offset = 0;
   for (const e of entries) {
-    const body = e.deflate ? new Uint8Array(await new Response(new Blob([e.data]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer()) : e.data;
+    const body = e.deflate ? new Uint8Array(await new Response(new Blob([new Uint8Array(e.data)]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer()) : e.data;
     const name = enc.encode(e.name), crc = crc32(e.data), method = e.deflate ? 8 : 0;
     const local = new Uint8Array(30 + name.length);
     const lv = new DataView(local.buffer);

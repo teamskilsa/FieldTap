@@ -10,10 +10,11 @@
 //   deno run -A tools/build.ts [--outdir dist]
 
 import { makeSample } from './make-sample.ts';
+import { localPath } from './local_path.ts';
 
 const outdir = (() => {
   const i = Deno.args.indexOf('--outdir');
-  return i >= 0 ? Deno.args[i + 1]! : new URL('../dist', import.meta.url).pathname;
+  return i >= 0 ? Deno.args[i + 1]! : localPath(new URL('../dist', import.meta.url));
 })();
 
 async function esbuild(entry: string, out: string): Promise<void> {
@@ -21,7 +22,7 @@ async function esbuild(entry: string, out: string): Promise<void> {
     args: [
       '--yes',
       'esbuild',
-      new URL(`../src/${entry}`, import.meta.url).pathname,
+      localPath(new URL(`../src/${entry}`, import.meta.url)),
       '--bundle',
       '--format=esm',
       '--platform=browser',

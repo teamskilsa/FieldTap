@@ -3,8 +3,9 @@
 // capture-derived data inside web/engine.
 
 import { assert, assertEquals } from './assert.ts';
+import { localPath } from '../tools/local_path.ts';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = localPath(new URL('..', import.meta.url));
 
 function files(dir: string, ext: RegExp): string[] {
   const out: string[] = [];

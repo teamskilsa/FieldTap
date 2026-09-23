@@ -17,6 +17,7 @@ import {
   randomStream, type Run, securePacket, SKIP_FRAME, ts2026, tsvOf, withOtherIds,
 } from './qdss_support.ts';
 import { concat, randomPieces, rng } from './support.ts';
+import { localPath } from '../tools/local_path.ts';
 
 const bytes = (seed: number, n: number) => {
   const r = rng(seed);
@@ -436,7 +437,7 @@ Deno.test('lifecycle: an unended chunk is ended at finish, an empty chunk counts
 
 const REFERENCE = fixture('reference/qdss_deframe.py');
 // The reference imports fieldtap.diag.hdlc from the checkout it names.
-const FIELDTAP_HDLC = new URL('../../../fieldtap/diag/hdlc.py', import.meta.url).pathname;
+const FIELDTAP_HDLC = localPath(new URL('../../../fieldtap/diag/hdlc.py', import.meta.url));
 const python = (() => {
   try {
     return new Deno.Command('python3', { args: ['--version'], stdout: 'null', stderr: 'null' }).outputSync().success;
