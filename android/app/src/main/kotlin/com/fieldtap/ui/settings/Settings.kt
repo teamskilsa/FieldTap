@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -69,6 +70,7 @@ import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZones
 import com.fieldtap.core.readiness.SettingsTarget
 import com.fieldtap.core.settings.AppSettings
+import com.fieldtap.diag.CaptureProfile
 import com.fieldtap.platform.Permissions
 import com.fieldtap.ui.components.EmptyState
 import com.fieldtap.ui.components.FieldTapPreviews
@@ -76,6 +78,7 @@ import com.fieldtap.ui.components.LoadingState
 import com.fieldtap.ui.components.NavigationRow
 import com.fieldtap.ui.components.PermissionStatus
 import com.fieldtap.ui.components.PreviewSurface
+import com.fieldtap.ui.components.RadioRow
 import com.fieldtap.ui.components.SectionCard
 import com.fieldtap.ui.components.SectionDivider
 import com.fieldtap.ui.components.ToggleRow
@@ -196,6 +199,11 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
 
     fun setTestsDefaultOn(on: Boolean) {
         save(success = null) { settings -> settings.copy(testsDefaultOn = on) }
+    }
+
+    /** What the next RRC / NAS log asks the modem for. Saved at once, like a switch. */
+    fun setCaptureProfile(profile: CaptureProfile) {
+        save(success = null) { settings -> settings.copy(captureProfile = profile) }
     }
 
     /** Adds or replaces by id, after validation. */
@@ -352,6 +360,7 @@ fun SettingsScreen(
         onOpenAbout = onOpenAbout,
         onOpenProbe = onOpenProbe,
         onTestsDefaultOnChange = viewModel::setTestsDefaultOn,
+        onCaptureProfileChange = viewModel::setCaptureProfile,
         onInstantUpdatesChange = { turnOn ->
             if (turnOn) {
                 when (phoneUi.action) {
@@ -471,6 +480,7 @@ internal fun SettingsContent(
     onOpenAbout: () -> Unit,
     onOpenProbe: () -> Unit,
     onTestsDefaultOnChange: (Boolean) -> Unit,
+    onCaptureProfileChange: (CaptureProfile) -> Unit,
     onInstantUpdatesChange: (Boolean) -> Unit,
     onAddZoneHere: () -> Unit,
     onAddZoneByCoordinates: () -> Unit,
@@ -529,6 +539,13 @@ internal fun SettingsContent(
                     testsDefaultOn = settings.testsDefaultOn,
                     onTestsDefaultOnChange = onTestsDefaultOnChange,
                     onOpenTestTargets = onOpenTestTargets,
+                    modifier = Modifier.setupContentWidth(),
+                )
+            }
+            item(key = "capture") {
+                CaptureCard(
+                    profile = settings.captureProfile,
+                    onProfileChange = onCaptureProfileChange,
                     modifier = Modifier.setupContentWidth(),
                 )
             }
@@ -610,6 +627,36 @@ private fun TestsCard(
             supportingText = testTargetsSummary(tests),
             icon = FieldTapIcons.Tune,
         )
+    }
+}
+
+/**
+ * The capture profile, one radio row per [CaptureProfile] with its own one-line cost. The names and
+ * descriptions come from the enum, not from resources, because the desktop decoder calls the profiles the
+ * same thing and a capture's summary records the name.
+ */
+@Composable
+private fun CaptureCard(
+    profile: CaptureProfile,
+    onProfileChange: (CaptureProfile) -> Unit,
+    modifier: Modifier,
+) {
+    SectionCard(
+        title = stringResource(R.string.settings_section_capture),
+        subtitle = stringResource(R.string.settings_capture_note),
+        icon = FieldTapIcons.Pulse,
+        modifier = modifier,
+    ) {
+        Column(modifier = Modifier.selectableGroup()) {
+            for (option in CaptureProfile.entries) {
+                RadioRow(
+                    title = option.label,
+                    selected = option == profile,
+                    onSelect = { onProfileChange(option) },
+                    supportingText = option.description,
+                )
+            }
+        }
     }
 }
 
@@ -959,6 +1006,7 @@ private fun SettingsPreview() {
             onOpenAbout = {},
             onOpenProbe = {},
             onTestsDefaultOnChange = {},
+            onCaptureProfileChange = {},
             onInstantUpdatesChange = {},
             onAddZoneHere = {},
             onAddZoneByCoordinates = {},

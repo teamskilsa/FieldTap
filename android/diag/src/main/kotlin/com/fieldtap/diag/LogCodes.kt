@@ -8,14 +8,28 @@ package com.fieldtap.diag
  * keeping separately from what the PDU itself says, because a disagreement between the two is a
  * decoding bug worth seeing rather than hiding — the desktop tool counts them, and so should this.
  *
- * Only the signalling codes are listed. A capture holds hundreds of others, which are kept in the
- * file for export but have nothing to show on a phone screen.
+ * The signalling codes are what the phone decodes, and [of] answers for them alone. The other codes
+ * a [CaptureProfile] can enable — measurements, MAC, state logs — are listed in [extra] so a capture
+ * can ask the modem for them; the phone keeps them in the file for the desktop tool and shows nothing.
+ * Both lists mirror `fieldtap/decode/registry.py`, and the golden mask files under
+ * `tests/fixtures/masks/` hold the two implementations to the same codes.
  *
  * Owner: workstream `diag-on-handset`.
  */
 object LogCodes {
 
-    enum class Category { RRC, NAS, CELL }
+    enum class Category {
+        RRC, NAS, CELL,
+
+        /** Measurements and PHY reports: RSRP, CSF, transmit power, decode statistics. */
+        MEAS,
+
+        /** MAC: RACH, scheduling, transport blocks. */
+        MAC,
+
+        /** State and configuration logs, kept for the desktop tool. */
+        OTHER,
+    }
 
     /** What the log code says a record is, before the body is read. */
     data class Info(
@@ -70,6 +84,51 @@ object LogCodes {
 
     private val BY_CODE: Map<Int, Info> = ALL.associateBy { it.code }
 
+    private fun meas(code: Int, name: String, rat: String) = Info(code, name, rat, Category.MEAS)
+    private fun mac(code: Int, name: String, rat: String) = Info(code, name, rat, Category.MAC)
+    private fun other(code: Int, name: String, rat: String) = Info(code, name, rat, Category.OTHER)
+
+    /**
+     * What the engineering profile adds to signalling: the register's `meas` codes plus the RACH, PLMN
+     * search, bearer and state logs it names. Names are the register's.
+     */
+    private val ENGINEERING_EXTRA: List<Info> = listOf(
+        mac(0xB061, "LTE MAC RACH Trigger", "lte"),
+        mac(0xB062, "LTE MAC RACH Attempt", "lte"),
+        other(0xB0C3, "LTE RRC PLMN Search Info", "lte"),
+        other(0xB0C4, "LTE RRC PLMN Search Request", "lte"),
+        other(0xB0E4, "LTE NAS ESM Bearer Context State", "lte"),
+        other(0xB0E5, "LTE NAS ESM Bearer Context Info", "lte"),
+        other(0xB0EE, "LTE NAS EMM State", "lte"),
+        meas(0xB139, "LTE PHY PUSCH Tx Report", "lte"),
+        meas(0xB14D, "LTE PHY PUCCH CSF", "lte"),
+        meas(0xB14E, "LTE PHY PUSCH CSF", "lte"),
+        meas(0xB16B, "LTE PHY PDCCH-PHICH Indication Report", "lte"),
+        meas(0xB173, "LTE PDSCH Stat Indication", "lte"),
+        meas(0xB179, "LTE ML1 Connected Mode LTE Intra-Freq Meas Results", "lte"),
+        meas(0xB17F, "LTE ML1 Serving Cell Meas and Eval", "lte"),
+        meas(0xB180, "LTE ML1 Idle Neighbor Meas Results", "lte"),
+        meas(0xB193, "LTE ML1 Serving Cell Measurement Result", "lte"),
+        meas(0xB195, "LTE ML1 Connected Neighbor Meas Request/Response", "lte"),
+        other(0xB80F, "NR NAS MM5G Service Request", "nr"),
+        other(0xB814, "NR NAS SM5G State", "nr"),
+        other(0xB825, "NR RRC Configuration Info", "nr"),
+        other(0xB826, "NR5G RRC Supported CA Combos", "nr"),
+        mac(0xB883, "NR MAC UL Physical Channel Schedule Report", "nr"),
+        mac(0xB888, "NR MAC PDSCH Stats", "nr"),
+        meas(0xB975, "NR ML1 Serving Cell Beam Management", "nr"),
+        meas(0xB97F, "NR ML1 Searcher Measurement DB Update Ext", "nr"),
+    )
+
+    /** What full L2 adds to engineering: every MAC transport block, and the rest of the register's `mac` codes. */
+    private val L2_EXTRA: List<Info> = listOf(
+        mac(0xB063, "LTE MAC DL Transport Block", "lte"),
+        mac(0xB064, "LTE MAC UL Transport Block", "lte"),
+        mac(0xB872, "NR L2 UL Transport Block", "nr"),
+        mac(0xB887, "NR MAC PDSCH Info", "nr"),
+        mac(0xB88A, "NR MAC RACH Attempt", "nr"),
+    )
+
     /** What [code] is, or null when it is not a signalling code. */
     fun of(code: Int): Info? = BY_CODE[code]
 
@@ -78,4 +137,14 @@ object LogCodes {
 
     /** The codes a signalling capture should enable. */
     fun signallingCodes(): List<Int> = ALL.map { it.code }
+
+    /** The codes [profile] enables beyond signalling; nothing here is decoded on the phone. */
+    fun extra(profile: CaptureProfile): List<Info> = when (profile) {
+        CaptureProfile.SIGNALLING -> emptyList()
+        CaptureProfile.ENGINEERING -> ENGINEERING_EXTRA
+        CaptureProfile.L2 -> ENGINEERING_EXTRA + L2_EXTRA
+    }
+
+    /** The codes a capture with [profile] should enable, ascending: `profile_codes(profile.key)` in Python. */
+    fun codes(profile: CaptureProfile): List<Int> = (signallingCodes() + extra(profile).map { it.code }).sorted()
 }

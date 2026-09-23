@@ -311,6 +311,10 @@
     <string name="settings_tests_network_note">On the mobile network only, never on Wi-Fi.</string>
     <string name="settings_tests_default">Run tests by default</string>
     <string name="settings_tests_default_supporting">You can still change this each time you start a session.</string>
+    <!-- The capture profile: which log codes an RRC / NAS log asks the modem for. The options are named in code
+         (CaptureProfile), because the desktop decoder names them the same way. -->
+    <string name="settings_section_capture">RRC / NAS log</string>
+    <string name="settings_capture_note">What the next RRC / NAS log asks the modem for. Rooted phones only; a wider profile makes a larger file.</string>
     <!-- The row in Settings that opens the test targets, and that screen's title. -->
     <string name="settings_test_targets">Test targets</string>
     <!-- %1$s is the ping target, %2$s the interval in seconds, e.g. Ping 10.0.2.2 every 20 s. -->

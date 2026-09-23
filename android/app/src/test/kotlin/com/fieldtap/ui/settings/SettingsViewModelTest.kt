@@ -7,6 +7,7 @@ import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.Consent
 import com.fieldtap.core.privacy.PrivacyZone
 import com.fieldtap.core.privacy.PrivacyZones
+import com.fieldtap.diag.CaptureProfile
 import com.fieldtap.ui.setup.FakeAppGraph
 import com.fieldtap.ui.setup.SetupMainDispatcherRule
 import com.fieldtap.ui.setup.SetupSamples
@@ -302,6 +303,22 @@ class SettingsViewModelTest {
         assertEquals(listOf<SettingsEvent>(SettingsEvent.SaveFailed, SettingsEvent.SaveFailed), events)
         assertFalse(graph.fakeSettings.stored.value.testsDefaultOn)
         assertTrue(graph.fakeSettings.stored.value.zones.isEmpty())
+    }
+
+    @Test
+    fun theCaptureProfileIsSavedAtOnceWithoutASnackbar() = runTest {
+        val graph = FakeAppGraph()
+        val viewModel = SettingsViewModel(graph)
+        val events = collectEvents(viewModel)
+        advanceUntilIdle()
+        assertEquals(CaptureProfile.SIGNALLING, viewModel.state.value.settings?.captureProfile)
+
+        viewModel.setCaptureProfile(CaptureProfile.ENGINEERING)
+        advanceUntilIdle()
+
+        assertEquals(CaptureProfile.ENGINEERING, graph.fakeSettings.stored.value.captureProfile)
+        assertEquals(CaptureProfile.ENGINEERING, viewModel.state.value.settings?.captureProfile)
+        assertTrue("a radio row shows its own state; no snackbar", events.isEmpty())
     }
 
     @Test

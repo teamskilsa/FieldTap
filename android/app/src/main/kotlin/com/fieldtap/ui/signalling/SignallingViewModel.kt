@@ -2,19 +2,23 @@ package com.fieldtap.ui.signalling
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fieldtap.app.SettingsRepository
 import com.fieldtap.data.CaptureStore
 import com.fieldtap.data.SavedCapture
 import com.fieldtap.diag.CallFlow
+import com.fieldtap.diag.CaptureProfile
 import com.fieldtap.platform.diag.DiagCaptureResult
 import com.fieldtap.platform.diag.HandsetDiagCapture
 import com.fieldtap.platform.diag.RootShell
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,6 +37,8 @@ data class SignallingUiState(
     val justSaved: String? = null,
     val message: String? = null,
     val failed: Boolean = false,
+    /** What the running capture asks the modem for; between captures, what the next one will. */
+    val profile: CaptureProfile = CaptureProfile.SIGNALLING,
 )
 
 /** One capture, opened. */
@@ -52,11 +58,16 @@ data class CaptureDetailUiState(
  * The capture file is kept after decoding rather than deleted, because it is the half the phone cannot
  * read — RRC — and the only way to get at that is to hand the file to Wireshark or `fieldtap report`.
  *
+ * The profile comes from `AppSettings.captureProfile` at the moment a capture starts and is fixed for its
+ * length: changing the setting mid-capture cannot change what the modem was asked for, so the card keeps
+ * showing the profile that is actually running until it stops.
+ *
  * Owner: workstream `diag-on-handset`.
  */
 class SignallingViewModel(
     private val scratchDir: File,
     private val store: CaptureStore,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     private val capture = HandsetDiagCapture()
@@ -65,8 +76,23 @@ class SignallingViewModel(
     private var job: Job? = null
     private var startedUtcMs: Long = 0
 
+    /** The setting as last read; what the card shows between captures and what the next start uses. */
+    private var chosenProfile: CaptureProfile = CaptureProfile.SIGNALLING
+
+    /** The profile of the capture in progress, recorded in its summary when it is saved. */
+    private var startedProfile: CaptureProfile = CaptureProfile.SIGNALLING
+
     init {
         refresh()
+        viewModelScope.launch {
+            settings.settings
+                // Unreadable settings leave the profile at the last value seen; the capture still runs.
+                .catch { error -> if (error !is Exception) throw error }
+                .collect { stored ->
+                    chosenProfile = stored.captureProfile
+                    if (!_state.value.capturing) _state.value = _state.value.copy(profile = chosenProfile)
+                }
+        }
     }
 
     /** Re-counts the kept captures, for example after one is saved or deleted. */
@@ -86,13 +112,22 @@ class SignallingViewModel(
         if (job?.isActive == true) return
         job = viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, message = null, failed = false)
-            when (val result = capture.start()) {
+            val profile = try {
+                settings.current().captureProfile
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                chosenProfile
+            }
+            when (val result = capture.start(profile)) {
                 is DiagCaptureResult.Started -> {
                     startedUtcMs = System.currentTimeMillis()
+                    startedProfile = profile
                     _state.value = _state.value.copy(
                         capturing = true,
                         busy = false,
                         message = "Recording. Make a call, or move until the phone changes cell.",
+                        profile = profile,
                     )
                 }
 
@@ -130,6 +165,7 @@ class SignallingViewModel(
                     busy = false,
                     failed = true,
                     message = "Nothing was captured.",
+                    profile = chosenProfile,
                 )
                 return@launch
             }
@@ -148,6 +184,7 @@ class SignallingViewModel(
                         records = flow.records,
                         messages = flow.events.size,
                         rejects = flow.failures,
+                        profile = startedProfile,
                     )
                 }
             }
@@ -155,6 +192,7 @@ class SignallingViewModel(
                 _state.value = _state.value.copy(
                     capturing = false, busy = false, failed = true,
                     message = "Could not read the capture.",
+                    profile = chosenProfile,
                 )
                 return@launch
             }
@@ -165,6 +203,7 @@ class SignallingViewModel(
                 message = summaryLine(saved),
                 justSaved = saved.name,
                 keptCount = withContext(Dispatchers.IO) { store.list().size },
+                profile = chosenProfile,
             )
         }
     }
@@ -178,7 +217,7 @@ class SignallingViewModel(
     }
 
     private fun fail(reason: String) {
-        _state.value = _state.value.copy(capturing = false, busy = false, failed = true, message = reason)
+        _state.value = _state.value.copy(capturing = false, busy = false, failed = true, message = reason, profile = chosenProfile)
     }
 
     private fun summaryLine(saved: SavedCapture): String = when {

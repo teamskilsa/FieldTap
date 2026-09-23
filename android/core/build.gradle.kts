@@ -23,10 +23,12 @@ tasks.test {
 }
 
 // Every dependency the :core workstreams need is declared here up front, so no implementer has to
-// edit this file (android/ARCHITECTURE.md, "Shared files"). :format and coroutines types appear in
-// :core's public signatures, hence api.
+// edit this file (android/ARCHITECTURE.md, "Shared files"). :format, :diag and coroutines types appear in
+// :core's public signatures, hence api. :diag has no dependencies of its own; `AppSettings.captureProfile`
+// is its `CaptureProfile`, so the setting and the log mask cannot name different profiles.
 dependencies {
     api(project(":format"))
+    api(project(":diag"))
     api(libs.kotlinx.coroutines.core)
     // Reading JSON only (settings codec); session files are written by :format's own writer.
     implementation(libs.kotlinx.serialization.json)

@@ -61,6 +61,7 @@ import com.fieldtap.app.SessionSummary
 import com.fieldtap.core.export.ExportResult
 import com.fieldtap.data.CaptureStore
 import com.fieldtap.data.SavedCapture
+import com.fieldtap.diag.CaptureProfile
 import com.fieldtap.core.session.SignalSummary
 import com.fieldtap.core.session.StoragePolicy
 import com.fieldtap.core.session.StorageStatus
@@ -635,7 +636,12 @@ private fun CaptureRow(
 ) {
     val startedText = startedWords(capture.startedUtcMs, nowUtcMs)
     val sizeText = Formats.decimalBytes(capture.bytes)
-    val kind = stringResource(R.string.recordings_capture_kind)
+    // "Call flow" for the everyday capture; a wider profile is named, because it is why the file is large
+    // and what the desktop tool will find in it.
+    val kind = capture.profile
+        ?.takeIf { it != CaptureProfile.SIGNALLING }
+        ?.let { stringResource(R.string.recordings_capture_kind) + stringResource(R.string.value_separator) + it.label }
+        ?: stringResource(R.string.recordings_capture_kind)
     val chip = when {
         capture.rejects > 0 -> stringResource(R.string.recordings_capture_rejects, capture.rejects)
         capture.hasSignalling -> stringResource(R.string.recordings_capture_messages, capture.messages)

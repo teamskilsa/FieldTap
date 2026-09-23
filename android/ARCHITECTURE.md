@@ -83,7 +83,7 @@ These settle what review rounds 1 and 2 left to the lead. Where one of them and 
 ```
 :format   Kotlin/JVM   the bytes of the seven session files        deps: kotlinx-serialization-json (reading only)
    ^
-:core     Kotlin/JVM   every decision that needs no Android         deps: api(:format), api(coroutines-core)
+:core     Kotlin/JVM   every decision that needs no Android         deps: api(:format), api(:diag), api(coroutines-core)
    ^
 :app      Android      thin adapters, the service, the screens      deps: :core, :format, AndroidX, Compose
 ```

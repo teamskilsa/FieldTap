@@ -294,7 +294,7 @@ fun FieldTapNavHost(
                         viewModel(factory = graphViewModelFactory(graph) { SessionsViewModel(it, store) })
                     val live: LiveViewModel = viewModel(factory = graphViewModelFactory(graph) { LiveViewModel(it) })
                     val signalling: SignallingViewModel = viewModel(
-                        factory = graphViewModelFactory(graph) { SignallingViewModel(scratchDir(context), store) },
+                        factory = graphViewModelFactory(graph) { SignallingViewModel(scratchDir(context), store, it.settings) },
                     )
                     SessionsScreen(
                         viewModel = viewModel,

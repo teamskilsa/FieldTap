@@ -103,6 +103,9 @@ fun LogsHeader(
             stopLabel = stringResource(R.string.logs_rrc_stop),
             onStart = signalling::start,
             onStop = signalling::stop,
+            // The profile beside the button: what the next capture asks for, or what the running one is asking
+            // for. It is chosen in Setup, where its cost is explained; here it only needs to be visible.
+            profile = capture.profile.label,
         )
     }
 
@@ -123,6 +126,8 @@ private fun RecordCard(
     onStop: () -> Unit,
     badge: String? = null,
     detailIsError: Boolean = false,
+    /** Shown as a small tag beside the button, e.g. the capture profile. */
+    profile: String? = null,
 ) {
     val recordRed = FieldTapDesign.colors.signal.poor.fill
     Surface(
@@ -163,17 +168,53 @@ private fun RecordCard(
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
-            Button(
-                onClick = if (active) onStop else onStart,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(top = 2.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = if (active) {
-                    ButtonDefaults.buttonColors(containerColor = recordRed, contentColor = Color.White)
-                } else {
-                    ButtonDefaults.buttonColors()
-                },
-            ) { Text(if (active) stopLabel else startLabel) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(
+                    onClick = if (active) onStop else onStart,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = if (active) {
+                        ButtonDefaults.buttonColors(containerColor = recordRed, contentColor = Color.White)
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
+                ) { Text(if (active) stopLabel else startLabel) }
+                if (profile != null) ProfileTag(profile)
+            }
+        }
+    }
+}
+
+/** "PROFILE / Engineering" in a quiet outlined tag, the height of the button beside it. */
+@Composable
+private fun ProfileTag(profile: String) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                stringResource(R.string.logs_rrc_profile).uppercase(Locale.ROOT),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                profile,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
         }
     }
 }

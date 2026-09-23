@@ -1,6 +1,7 @@
 package com.fieldtap.platform.diag
 
 import android.util.Log
+import com.fieldtap.diag.CaptureProfile
 import com.fieldtap.diag.LogCodes
 import com.fieldtap.diag.LogMask
 import java.io.File
@@ -35,9 +36,11 @@ sealed interface DiagCaptureResult {
  * Root is required and is asked for through the superuser app already on the phone, the same way the
  * capability probe asks. Nothing is installed and no exploit is run.
  *
- * The mask comes from [LogCodes.signallingCodes] via [LogMask.file], so the handset asks for exactly the
- * records the decoder can read rather than everything the modem can emit — a full-mask capture is tens of
- * megabytes a minute and almost all of it is debug text this app cannot decode.
+ * The mask comes from [LogCodes.codes] for the chosen [CaptureProfile] via [LogMask.file], so the handset
+ * asks for exactly the records the decoders read rather than everything the modem can emit — a full-mask
+ * capture is tens of megabytes a minute and almost all of it is debug text nothing decodes. Each profile
+ * has a mask file of its own name, so a file left by an earlier capture can never stand in for another
+ * profile's.
  *
  * `diag_mdlog` writes as root. The output goes to shared storage rather than the app's own directory
  * because the logger falls back to `/sdcard/diag_logs` when it cannot create what it was given, and a
@@ -57,7 +60,6 @@ class HandsetDiagCapture(
 
     /** Where the logger writes on the handset; readable by the app, removed after [collect]. */
     private val outputDir = "/sdcard/diag_logs"
-    private val maskPath = "/data/local/tmp/fieldtap-signalling.cfg"
 
     /** True when `diag_mdlog` exists on this phone. */
     suspend fun available(): Boolean = runInterruptible(Dispatchers.IO) {
@@ -65,17 +67,18 @@ class HandsetDiagCapture(
     }
 
     /**
-     * Writes the mask and starts the logger. Safe to call when one is already running: the previous
-     * instance is stopped first, because two would fight over the same diag session.
+     * Writes the mask for [profile] and starts the logger. Safe to call when one is already running: the
+     * previous instance is stopped first, because two would fight over the same diag session.
      */
-    suspend fun start(): DiagCaptureResult = runInterruptible(Dispatchers.IO) {
+    suspend fun start(profile: CaptureProfile = CaptureProfile.SIGNALLING): DiagCaptureResult = runInterruptible(Dispatchers.IO) {
         val root = RootShell.root(RootShell.exec(listOf("su", "-c", "id"), grantTimeoutMs))
         if (root != RootShell.Root.GRANTED) return@runInterruptible DiagCaptureResult.NoRoot(root)
         if (!File(LOGGER).let { it.exists() || run("ls $LOGGER").contains(LOGGER) }) {
             return@runInterruptible DiagCaptureResult.NoLogger
         }
         run("$LOGGER -k")
-        val mask = LogMask.file(LogCodes.signallingCodes(), LogMask.DEFAULT_RANGES)
+        val maskPath = maskPath(profile)
+        val mask = LogMask.file(LogCodes.codes(profile), LogMask.DEFAULT_RANGES)
         val hex = mask.joinToString("") { "%02x".format(it) }
         // Written through the shell so the file lands with root's ownership, where the logger reads it.
         val wrote = run("rm -f $maskPath; printf '%s' $hex | xxd -r -p > $maskPath; ls -l $maskPath")
@@ -141,14 +144,20 @@ class HandsetDiagCapture(
 
     private fun quote(path: String) = "'" + path.replace("'", "'\\''") + "'"
 
-    private companion object {
-        const val LOGGER = "/vendor/bin/diag_mdlog"
-        const val SETTLE_MS = 1_500L
+    companion object {
+        private const val LOGGER = "/vendor/bin/diag_mdlog"
+        private const val SETTLE_MS = 1_500L
+
+        /**
+         * The mask file for [profile]: `/data/local/tmp/fieldtap-<key>.cfg`. One name per profile, so the file
+         * the logger reads is always the one this profile wrote, never a stale one from another.
+         */
+        fun maskPath(profile: CaptureProfile): String = "/data/local/tmp/fieldtap-${profile.key}.cfg"
 
         /** How long a stopping logger gets to flush and exit. It took 3.5 s on the bench; this allows for a busy phone. */
-        const val STOP_TIMEOUT_MS = 20_000L
-        const val STOP_POLL_MS = 250L
-        const val TAG = "HandsetDiagCapture"
+        private const val STOP_TIMEOUT_MS = 20_000L
+        private const val STOP_POLL_MS = 250L
+        private const val TAG = "HandsetDiagCapture"
     }
 }
 

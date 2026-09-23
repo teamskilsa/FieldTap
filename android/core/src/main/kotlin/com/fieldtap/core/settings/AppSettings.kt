@@ -3,6 +3,7 @@ package com.fieldtap.core.settings
 import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.ConsentRecord
 import com.fieldtap.core.privacy.PrivacyZone
+import com.fieldtap.diag.CaptureProfile
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -38,6 +39,8 @@ data class AppSettings(
     val readinessLastRunUtcMs: Long? = null,
     /** `started_utc` of the most recent session started on this install. */
     val lastSessionStartedUtcMs: Long? = null,
+    /** What the next RRC / NAS capture asks the modem for. Signalling, the smallest, unless changed. */
+    val captureProfile: CaptureProfile = CaptureProfile.SIGNALLING,
 )
 
 /**
@@ -51,7 +54,8 @@ data class AppSettings(
  * `tests` {`ping_target`, `ping_interval_ms`, `ping_count`, `ping_timeout_ms`, `download_url`,
  * `download_interval_ms`, `download_cap_bytes`, `session_budget_bytes`}, `zones`
  * [{`id`, `label`, `lat`, `lon`, `radius_m`}], `tests_default_on`,
- * `readiness_last_run_utc_ms`, `last_session_started_utc_ms`.
+ * `readiness_last_run_utc_ms`, `last_session_started_utc_ms`, `capture_profile` (a `CaptureProfile.key`:
+ * `signalling`, `engineering` or `l2`).
  *
  * Decoding field by field:
  * - A value of the wrong type counts as missing. Intervals, timeouts, the ping count and the cap must
@@ -63,6 +67,8 @@ data class AppSettings(
  * - A consent without a version, hash or grant time is absent.
  * - A zone without a numeric `lat`, `lon` and `radius_m` is dropped; a zone without an id gets a new
  *   random one; the order of zones is kept.
+ * - A `capture_profile` that names no known profile counts as missing, so a build that drops a profile
+ *   falls back to the smallest capture rather than refusing to read its settings.
  *
  * Tests: round trip; unknown key; missing tests object; corrupt text; zones list order kept.
  *
@@ -101,6 +107,7 @@ object AppSettingsCodec {
         put(TESTS_DEFAULT_ON, settings.testsDefaultOn)
         put(READINESS_LAST_RUN_UTC_MS, settings.readinessLastRunUtcMs)
         put(LAST_SESSION_STARTED_UTC_MS, settings.lastSessionStartedUtcMs)
+        put(CAPTURE_PROFILE, settings.captureProfile.key)
     }.toString()
 
     fun decode(text: String?, newInstallId: () -> String): AppSettings {
@@ -115,6 +122,7 @@ object AppSettingsCodec {
             testsDefaultOn = root.boolean(TESTS_DEFAULT_ON) ?: false,
             readinessLastRunUtcMs = root.long(READINESS_LAST_RUN_UTC_MS),
             lastSessionStartedUtcMs = root.long(LAST_SESSION_STARTED_UTC_MS),
+            captureProfile = CaptureProfile.fromKey(root.string(CAPTURE_PROFILE)) ?: CaptureProfile.SIGNALLING,
         )
     }
 
@@ -217,4 +225,5 @@ object AppSettingsCodec {
     private const val TESTS_DEFAULT_ON = "tests_default_on"
     private const val READINESS_LAST_RUN_UTC_MS = "readiness_last_run_utc_ms"
     private const val LAST_SESSION_STARTED_UTC_MS = "last_session_started_utc_ms"
+    private const val CAPTURE_PROFILE = "capture_profile"
 }

@@ -113,4 +113,6 @@
     <string name="logs_rrc_detail">The call flow from the modem: attach, RRC, handover, and why the network says no.</string>
     <string name="logs_rrc_start">Record RRC / NAS</string>
     <string name="logs_rrc_stop">Stop and read</string>
+    <!-- The small tag beside the record button naming the capture profile chosen in Setup. -->
+    <string name="logs_rrc_profile">Profile</string>
 </resources>

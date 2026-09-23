@@ -3,6 +3,7 @@ package com.fieldtap.core.settings
 import com.fieldtap.core.nettest.TestSettings
 import com.fieldtap.core.privacy.ConsentRecord
 import com.fieldtap.core.privacy.PrivacyZone
+import com.fieldtap.diag.CaptureProfile
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -36,6 +37,7 @@ class AppSettingsCodecTest {
         testsDefaultOn = true,
         readinessLastRunUtcMs = 1_789_050_500_000L,
         lastSessionStartedUtcMs = 1_789_050_600_000L,
+        captureProfile = CaptureProfile.L2,
     )
 
     private val neverCalled: () -> String = { throw AssertionError("a document with an install id keeps it") }
@@ -210,16 +212,36 @@ class AppSettingsCodecTest {
     }
 
     @Test
+    fun everyCaptureProfileRoundTripsUnderItsRegisterName() {
+        for (profile in CaptureProfile.entries) {
+            val settings = AppSettings(installId = "abc", captureProfile = profile)
+            val text = AppSettingsCodec.encode(settings)
+            assertTrue(text, text.contains("\"capture_profile\":\"${profile.key}\""))
+            assertEquals(settings, decode(text))
+        }
+    }
+
+    @Test
+    fun aMissingUnknownOrMistypedCaptureProfileIsSignalling() {
+        // A build that drops a profile, or a hand-edited document, must still read; the smallest capture is the
+        // one that cannot surprise anyone with a large file.
+        for (profile in listOf("", ", \"capture_profile\": \"corpus\"", ", \"capture_profile\": 2", ", \"capture_profile\": null", ", \"capture_profile\": \"L2\"")) {
+            assertEquals(profile, CaptureProfile.SIGNALLING, decode("{\"install_id\": \"abc\"" + profile + "}").captureProfile)
+        }
+    }
+
+    @Test
     fun theDocumentUsesStableSnakeCaseKeys() {
         val root = Json.parseToJsonElement(AppSettingsCodec.encode(full)) as JsonObject
         assertEquals(
             setOf(
                 "settings_version", "install_id", "consent", "tests", "zones",
-                "tests_default_on", "readiness_last_run_utc_ms", "last_session_started_utc_ms",
+                "tests_default_on", "readiness_last_run_utc_ms", "last_session_started_utc_ms", "capture_profile",
             ),
             root.keys,
         )
         assertEquals("1", root["settings_version"].toString())
+        assertEquals("\"l2\"", root["capture_profile"].toString())
         assertEquals(setOf("version", "sha256", "granted_utc_ms"), (root["consent"] as JsonObject).keys)
         assertEquals(
             setOf(

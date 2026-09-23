@@ -1,5 +1,6 @@
 package com.fieldtap.data
 
+import com.fieldtap.diag.CaptureProfile
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,6 +92,25 @@ class CaptureStoreTest {
         assertNotNull(again)
         assertEquals(0, again!!.records)
         assertTrue(store.qmdl(saved.name)!!.isFile)
+    }
+
+    @Test
+    fun theProfileIsRecordedInTheSummaryAndReadBack() {
+        val store = store()
+        val saved = store.save(source(), 1_789_050_600_000L, 1, 0, 0, profile = CaptureProfile.ENGINEERING)!!
+        assertEquals(CaptureProfile.ENGINEERING, saved.profile)
+        assertEquals(CaptureProfile.ENGINEERING, store.find(saved.name)!!.profile)
+        val summary = File(File(temp.root, "signalling/${saved.name}"), CaptureStore.SUMMARY).readText()
+        assertTrue(summary, summary.contains("profile=engineering\n"))
+    }
+
+    @Test
+    fun aCaptureFromBeforeProfilesWereRecordedHasNone() {
+        val store = store()
+        val saved = store.save(source(), 1_789_050_600_000L, 1, 0, 0)!!
+        val summary = File(File(temp.root, "signalling/${saved.name}"), CaptureStore.SUMMARY)
+        summary.writeText(summary.readLines().filterNot { it.startsWith("profile=") }.joinToString("\n") + "\n")
+        assertNull("unknown, rather than a guess", store.find(saved.name)!!.profile)
     }
 
     @Test

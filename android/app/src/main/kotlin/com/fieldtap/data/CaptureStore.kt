@@ -1,5 +1,6 @@
 package com.fieldtap.data
 
+import com.fieldtap.diag.CaptureProfile
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -19,6 +20,8 @@ data class SavedCapture(
     val messages: Int,
     /** How many of those were the network refusing something. */
     val rejects: Int,
+    /** What the modem was asked for, or null for a capture from before profiles were recorded. */
+    val profile: CaptureProfile? = null,
 ) {
     val hasSignalling: Boolean get() = messages > 0
 }
@@ -28,7 +31,8 @@ data class SavedCapture(
  *
  * A capture is a directory under `filesDir/signalling/`, named for the time it started, holding the raw
  * `capture.qmdl` and a small `summary.txt`. The summary exists so the list can be drawn without decoding
- * every capture — a 7 MB file takes a moment to walk, and a list of ten should not take ten moments.
+ * every capture — a 7 MB file takes a moment to walk, and a list of ten should not take ten moments. It
+ * also records the [CaptureProfile] the modem was asked for, which the file itself does not say.
  *
  * The `.qmdl` stays the source of truth: opening a capture decodes it again rather than reading a stored
  * copy of the flow. A decode that drifts from the file it claims to describe is worse than a slow screen,
@@ -61,7 +65,14 @@ class CaptureStore(private val root: File) {
      * The file is moved rather than copied when it can be: a capture is megabytes, and the source is a
      * scratch file nobody else needs. A rename across filesystems fails, so a copy is the fallback.
      */
-    fun save(source: File, startedUtcMs: Long, records: Int, messages: Int, rejects: Int): SavedCapture? {
+    fun save(
+        source: File,
+        startedUtcMs: Long,
+        records: Int,
+        messages: Int,
+        rejects: Int,
+        profile: CaptureProfile = CaptureProfile.SIGNALLING,
+    ): SavedCapture? {
         if (!source.isFile || source.length() == 0L) return null
         val name = stamp(startedUtcMs)
         val dir = File(root, name)
@@ -78,6 +89,7 @@ class CaptureStore(private val root: File) {
                     "$KEY_RECORDS=$records",
                     "$KEY_MESSAGES=$messages",
                     "$KEY_REJECTS=$rejects",
+                    "$KEY_PROFILE=${profile.key}",
                 ).joinToString("\n") + "\n",
                 Charsets.UTF_8,
             )
@@ -121,6 +133,7 @@ class CaptureStore(private val root: File) {
             records = fields[KEY_RECORDS]?.toIntOrNull() ?: 0,
             messages = fields[KEY_MESSAGES]?.toIntOrNull() ?: 0,
             rejects = fields[KEY_REJECTS]?.toIntOrNull() ?: 0,
+            profile = CaptureProfile.fromKey(fields[KEY_PROFILE]),
         )
     }
 
@@ -143,6 +156,7 @@ class CaptureStore(private val root: File) {
         private const val KEY_RECORDS = "records"
         private const val KEY_MESSAGES = "messages"
         private const val KEY_REJECTS = "rejects"
+        private const val KEY_PROFILE = "profile"
         private const val MAX_COLLISIONS = 100
     }
 }
