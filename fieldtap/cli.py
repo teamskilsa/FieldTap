@@ -425,7 +425,7 @@ def _add_auto_arguments(p) -> None:
     out.add_argument("--no-report", action="store_true")
     out.add_argument("--open-report", action="store_true", help="open report.html in the browser when a session ends")
     logs = p.add_argument_group("logs")
-    logs.add_argument("--profile", default="signalling", help="signalling (default), lte, nr, corpus, or all")
+    logs.add_argument("--profile", default="signalling", help="signalling (default), engineering, l2, lte, nr, corpus, or all")
     logs.add_argument("--codes", help="explicit log codes, e.g. 0xB821,0xB0C0")
     logs.add_argument("--keep-debug", action="store_true")
     logs.add_argument("--seconds", type=float, help="stop each session after N seconds")
@@ -673,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--handset-info", action="store_true", help="query adb getprop for the sidecar")
     logs = p.add_argument_group("logs")
     logs.add_argument("--profile", default="signalling",
-                      help="log profile: signalling, lte, nr, corpus, or all (every code the modem reports)")
+                      help="log profile: signalling, engineering (adds measurements, PHY, RACH, state), l2 (adds MAC transport blocks), lte, nr, corpus, or all (every code the modem reports)")
     logs.add_argument("--codes", help="explicit log codes, e.g. 0xB821,0xB0C0")
     logs.add_argument("--keep-debug", action="store_true", help="do not silence modem debug messages")
     logs.add_argument("--seconds", type=float, help="stop after N seconds")

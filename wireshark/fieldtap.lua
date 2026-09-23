@@ -12,8 +12,14 @@
 -- each record shows its log code, name, modem timestamp and, for the layouts FieldTap
 -- knows, its fields. Files are load-order independent: each one creates the shared
 -- table if it does not exist yet.
+--
+-- Wireshark (4.0.1 checked) runs every plugin file in its own environment: a bare global
+-- written in one file is invisible to the others, while _G is shared and bare reads fall
+-- through to it. So the shared table is published through _G, and every file of the
+-- plugin does the same.
 
-FieldTap = FieldTap or { decoders = {}, names = {}, confidence = {} }
+FieldTap = _G.FieldTap or { decoders = {}, names = {}, confidence = {}, helpers = {} }
+_G.FieldTap = FieldTap
 
 -- log code -> name, from the register
 FieldTap.names = {
@@ -112,7 +118,7 @@ FieldTap.confidence = {
   [0xB809] = "low",
   [0xB80A] = "medium",
   [0xB80B] = "medium",
-  [0xB80C] = "low",
+  [0xB80C] = "medium",
   [0xB80D] = "low",
   [0xB80E] = "low",
   [0xB80F] = "low",
@@ -164,7 +170,8 @@ local function qc_time(raw)
   return NSTime.new(GPS_EPOCH + whole, math.floor((seconds - whole) * 1e9))
 end
 
--- Shared helpers for the per-code decoders (fieldtap_lte.lua, fieldtap_nr.lua).
+-- Shared helpers for the per-code decoders (fieldtap_lte.lua, fieldtap_nr.lua). Defined
+-- here whatever the load order; a per-code file that loaded first only created the table.
 FieldTap.helpers = FieldTap.helpers or {}
 local H = FieldTap.helpers
 
@@ -220,7 +227,7 @@ function proto.dissector(buf, pinfo, tree)
     if ok and summary ~= nil and summary ~= "" then
       info = info .. " · " .. summary
     elseif not ok then
-      root:add_expert_info(PI_MALFORMED, PI_WARN, "FieldTap decoder error: " .. tostring(summary))
+      root:add_expert_info(PI_UNDECODED, PI_NOTE, "FieldTap decoder error: " .. tostring(summary))
       info = info .. " · (layout did not fit; raw bytes kept)"
     end
   else
